@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 2 retest. Backend: pytest 10/10 passed, including the new tests for history dedupe and the 422 on long text. Frontend: Expo web tested on phone (390x844) and tablet (1280x800). All 6 requested items pass. (1) Phone layout: automatic overlap detection found 0 overlapping testID elements on Çeviri, Bağlantı and Ayarlar. The largest gap between sections is 24px (it was a large gap / overlap before), and the screenshots look correct. (2) Long button labels wrap to 2 lines ('Altyazı kayboldu' shows on 2 lines in a 48px-high button) and nothing is clipped. (3) TV IP 'abc' shows 'Geçersiz IPv4 adresi (kaydedilmedi)' and is not saved: after reload the field shows the last valid IP. A valid IP 192.168.1.77 stays after reload. The original empty value was restored. (4) The latency suffix is hidden after a skipped line, a filtered line, the clear button and the disappear+delay event. (5) Repeating the same text (also in upper case) gives history_id=null, cached=true and only 1 history row. Text over 600 chars shows the Turkish message 'Geçersiz metin (boş veya 600 karakterden uzun).' in translation-error. (6) The two-column tablet layout is fine on all 3 tabs. No deprecated packages found: native tabs now import from expo-router/native-tabs, and expo-av and expo-barcode-scanner are not used.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/translate", "issue": "Dedupe only compares with the newest history row across all clients. A→B→A still adds A again as a cached row (by design, only consecutive rows are deduped). The find_one+insert is not atomic, so two parallel identical requests can still both insert."},
+      {"endpoint": "DELETE /api/history", "issue": "There is no delete-by-id endpoint, so test runs cannot clean up only their own rows. The only option is to wipe all history."},
+      {"endpoint": "POST /api/translate (LLM quality)", "issue": "'TEST_ Get to the boat, quickly!' was translated as 'Teknea git, çabuk!'. The correct Turkish is 'Tekneye git, çabuk!' (wrong dative suffix). This is an occasional grammar slip from the model."},
+      {"endpoint": "server.py", "issue": "@app.on_event startup/shutdown is still used. It is deprecated in FastAPI; a lifespan handler should replace it."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TV IP input (connect.tsx:196-199)", "issue": "Each keystroke saves the value whenever it is valid. Typing '10.0.0.5x' saves the prefix '10.0.0.5', while the field shows the error 'kaydedilmedi'. After reload, '10.0.0.5' comes back, and startTvServer would use that stale prefix and not the value the user sees. Better: save on blur/submit, or block start-ws-server while tvIpErr is set.", "testID": "tv-ip-input", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Bağlantı (phone)", "issues": ["The tv-ip-input error text is below the field. When the keyboard or tab bar is shown, the error can be hidden off-screen (minor)."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_translate_api.py", "/app/test_reports/pytest/pytest_results_iter2.xml"],
+  "action_items": [
+    "Optional: save the TV IP on blur (or only when the full value is valid), so an invalid final edit cannot leave a stale valid prefix that is shown as 'kaydedilmedi'.",
+    "Optional: add DELETE /api/history/{id} so tests can remove only the rows they created.",
+    "Optional: switch the FastAPI on_event handlers to a lifespan handler."
+  ],
+  "critical_code_review_comments": [
+    "The history dedupe check (find_one newest + insert) is not atomic and is global across devices. This is acceptable for a single tablet.",
+    "PipelineProvider: the latency reset is now applied for skipped/filtered/cleared/disappeared events. Verified."
+  ],
+  "updated_files": ["/app/backend/tests/test_translate_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "100% of requested retest items"},
+  "seed_data_creation": "Created history rows (could not be deleted per id; DELETE /api/history was not run): 'TEST_ The bridge is collapsing, run now 69602', 'TEST Hold the line until the reinforcements arrive.' (x2: one fresh, one cached after a different line), 'TEST Get to the boat, quickly!', plus the iteration-1 test row 'Where is the hidden key, my friend? 6413'. The TV IP setting was restored to its original empty value.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest with EXPO_PUBLIC_BACKEND_URL set (the env key name is EXPO_PUBLIC_BACKEND_URL). Native modules are absent in the web preview, so 'Yerel Derleme Gerektirir' is expected. Tab testIDs: tab-status/tab-translate/tab-connect/tab-settings. The ScrollView scrolls internally, so full_page screenshots do not help; scroll the overflow div instead.",
+  "rca_of_issue": "Phone overlap is fixed: the wrappers are now style={wide ? {flex:1} : undefined}, so on phones the content sizes to its natural height."
+}

@@ -35,61 +35,61 @@ import { Appearance, StyleSheet, useColorScheme } from "react-native";
 
 export type ColorScheme = "light" | "dark";
 
-const light = {
+const dark = {
   // ---------------------------------------------------------------------------
   // Surfaces: backgrounds, from the screen down to small fills.
   // Each `on` key is the text and icon color for that background.
   // ---------------------------------------------------------------------------
-  surface: "#FFFFFF", // primary canvas, most of every screen
-  onSurface: "#111827", // text and icons on the canvas
-  surfaceSecondary: "#F9FAFB", // cards, sheets, list rows
-  onSurfaceSecondary: "#374151", // text and icons on cards, sheets, rows
-  surfaceTertiary: "#F3F4F6", // input backgrounds, chips, deepest nesting
-  onSurfaceTertiary: "#4B5563", // text on inputs and chips; also muted text
-  surfaceInverse: "#1F2937", // tooltips, snackbars, anything popping against the theme
-  onSurfaceInverse: "#FFFFFF", // text and icons on the inverse surface
-  muted: "#6B7280", // subdued text on surface: captions, timestamps, placeholders
+  surface: "#0A0A0A", // primary canvas, most of every screen
+  onSurface: "#F5F5F5", // text and icons on the canvas
+  surfaceSecondary: "#171717", // cards, sheets, list rows
+  onSurfaceSecondary: "#E5E5E5", // text and icons on cards, sheets, rows
+  surfaceTertiary: "#262626", // input backgrounds, chips, deepest nesting
+  onSurfaceTertiary: "#D4D4D4", // text on inputs and chips; also muted text
+  surfaceInverse: "#E5E5E5", // tooltips, snackbars, anything popping against the theme
+  onSurfaceInverse: "#0A0A0A", // text and icons on the inverse surface
+  muted: "#A3A3A3", // subdued text on surface: captions, timestamps, placeholders
 
   // ---------------------------------------------------------------------------
   // Brand: the identity color and the fills built from it.
   // Neutral by default; replace with the design guidelines values.
   // ---------------------------------------------------------------------------
-  brand: "#111827", // base hue, anchor only; Primary, Secondary, Tertiary are weights of it
-  onBrand: "#FFFFFF", // text and icons placed directly on brand
-  brandPrimary: "#111827", // primary CTA, active tab indicator, selected states
-  onBrandPrimary: "#FFFFFF", // text and icons on brandPrimary
-  brandSecondary: "#E5E7EB", // secondary CTA, less prominent accents
-  onBrandSecondary: "#111827", // text and icons on brandSecondary
-  brandTertiary: "#F3F4F6", // chips, tags, badges, subtle brand moments
-  onBrandTertiary: "#111827", // text and icons on brandTertiary
+  brand: "#D97706", // base hue, anchor only; Primary, Secondary, Tertiary are weights of it
+  onBrand: "#FFFBEB", // text and icons placed directly on brand
+  brandPrimary: "#F59E0B", // primary CTA, active tab indicator, selected states
+  onBrandPrimary: "#000000", // text and icons on brandPrimary
+  brandSecondary: "#B45309", // secondary CTA, less prominent accents
+  onBrandSecondary: "#FFFBEB", // text and icons on brandSecondary
+  brandTertiary: "#78350F", // chips, tags, badges, subtle brand moments
+  onBrandTertiary: "#FDE68A", // text and icons on brandTertiary
 
   // ---------------------------------------------------------------------------
   // Status: semantic only, never decorative. Fill for badges, banners and
   // toasts; the `on` key is text on that fill. The plain key is also safe as
   // text on `surface`.
   // ---------------------------------------------------------------------------
-  success: "#15803D",
-  onSuccess: "#FFFFFF",
-  warning: "#B45309",
-  onWarning: "#FFFFFF",
-  error: "#B91C1C",
-  onError: "#FFFFFF",
-  info: "#1D4ED8",
-  onInfo: "#FFFFFF",
+  success: "#10B981",
+  onSuccess: "#022C22",
+  warning: "#F59E0B",
+  onWarning: "#451A03",
+  error: "#EF4444",
+  onError: "#450A0A",
+  info: "#14B8A6",
+  onInfo: "#042F2E",
 
   // ---------------------------------------------------------------------------
   // Lines
   // ---------------------------------------------------------------------------
-  border: "#E5E7EB", // hairline outline, 0.5pt or 1pt max: inputs, cards
-  borderStrong: "#D1D5DB", // focus rings, selected outlines, 1.5pt max
-  divider: "#E5E7EB", // subtle list separators
+  border: "#262626", // hairline outline, 0.5pt or 1pt max: inputs, cards
+  borderStrong: "#404040", // focus rings, selected outlines, 1.5pt max
+  divider: "#1F1F1F", // subtle list separators
 };
 
-export type ThemeColors = typeof light;
+export type ThemeColors = typeof dark;
 
-export const defaultScheme = "light" satisfies ColorScheme;
+export const defaultScheme = "dark" satisfies ColorScheme;
 
-export const themes: { light: ThemeColors; dark?: ThemeColors } = { light };
+export const themes: { light: ThemeColors; dark?: ThemeColors } = { dark, light: dark };
 
 // In-app theme toggle, only after `dark` exists in `themes`. Call
 // setColorScheme("dark"), setColorScheme("light"), or setColorScheme(null) to
@@ -104,12 +104,12 @@ export function setColorScheme(scheme: ColorScheme | null) {
 // Keep native surfaces (alerts, pickers, navigation chrome) on the schemes this
 // app ships: light only forces light; once `dark` exists the device decides.
 // Optional call because react-native-web does not implement it.
-setColorScheme?.(themes.dark ? null : defaultScheme);
+setColorScheme?.(defaultScheme);
 
 export function useTheme(): { scheme: ColorScheme; colors: ThemeColors } {
   const system = useColorScheme();
   const scheme: ColorScheme = (system === "light" || system === "dark") && themes[system] ? system : defaultScheme;
-  return { scheme, colors: themes[scheme] ?? themes.light };
+  return { scheme, colors: themes[scheme] ?? themes.dark };
 }
 
 // Themed StyleSheet: returns a hook that builds the sheet from the active
