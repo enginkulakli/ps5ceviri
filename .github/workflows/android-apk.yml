@@ -2,6 +2,8 @@ name: Android APK Build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   build:
@@ -35,6 +37,17 @@ jobs:
         working-directory: frontend
         run: npx expo prebuild --platform android --non-interactive
 
+      - name: R8 küçültmesini kapat (açılış çökmesini ayırmak için)
+        working-directory: frontend/android
+        run: |
+          if grep -q 'minifyEnabled enableMinifyInReleaseBuilds' app/build.gradle; then
+            sed -i 's/minifyEnabled enableMinifyInReleaseBuilds/minifyEnabled false/' app/build.gradle
+          else
+            echo 'Beklenen minify ayarı bulunamadı; güvenli şekilde durduruluyor.'
+            grep -n 'minifyEnabled' app/build.gradle || true
+            exit 1
+          fi
+          grep -n 'minifyEnabled' app/build.gradle
       - name: APK oluştur
         working-directory: frontend/android
         run: chmod +x gradlew && ./gradlew assembleRelease
@@ -42,6 +55,6 @@ jobs:
       - name: APK dosyasını kaydet
         uses: actions/upload-artifact@v4
         with:
-          name: PS5-Cevirmen-APK
+          name: PS5-Cevirmen-APK-no-R8
           path: frontend/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
