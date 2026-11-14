@@ -7,7 +7,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
@@ -28,7 +28,8 @@ db = client[os.environ["DB_NAME"]]
 
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
 TRANSLATE_PROVIDER = os.environ["TRANSLATE_PROVIDER"]
-TRANSLATE_MODEL = os.environ["TRANSLATE_MODEL"]
+TRANSLATE_MODEL = os.environ["TRANSLATE_MODEL"]  # fast
+TRANSLATE_MODEL_BEST = os.environ["TRANSLATE_MODEL_BEST"]  # higher quality
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ class TranslateIn(BaseModel):
     target_lang: str = "tr"
     glossary: List[str] = Field(default_factory=list, max_length=200)
     save_history: bool = True
+    quality: Literal["fast", "best"] = "best"
 
 
 class TranslateOut(BaseModel):
@@ -112,6 +114,8 @@ class TranslateOut(BaseModel):
     history_id: Optional[str] = None
 
 
+PROMPT_VERSION = "v2"  # bump to invalidate cached translations made with an older prompt
+
 LANG_NAMES = {"en": "English", "tr": "Turkish", "de": "German", "fr": "French", "es": "Spanish", "ja": "Japanese"}
 
 
@@ -121,18 +125,35 @@ def normalize(text: str) -> str:
 
 def build_system_prompt(src: str, tgt: str, glossary: List[str]) -> str:
     glossary_line = (
-        "Never translate these protected names/terms, keep them exactly as written: " + ", ".join(glossary) + "."
+        "Protected names/terms (never translate or respell them; only add Turkish case suffixes after an apostrophe): "
+        + ", ".join(glossary)
+        + "."
         if glossary
         else ""
     )
-    return (
-        f"You translate video game subtitles from {LANG_NAMES.get(src, src)} to {LANG_NAMES.get(tgt, tgt)}. "
-        "Rules: output ONLY the translation, no quotes, no notes. Keep the sentence whole and natural, "
-        "use correct target-language punctuation. Keep character names, place names, proper nouns and game-specific "
-        "terms untranslated. If a line starts with a speaker label like 'NAME:' keep the label unchanged. "
-        "If the input is OCR noise with no meaning, output exactly an empty string. "
-        + glossary_line
+    base = (
+        f"You are a professional video game localizer translating subtitles from {LANG_NAMES.get(src, src)} "
+        f"to {LANG_NAMES.get(tgt, tgt)}. Output ONLY the translation: no quotes, no notes, no alternatives.\n"
+        "Rules:\n"
+        "- Translate the whole line as one natural sentence a Turkish game dub would use; keep meaning and tone.\n"
+        "- Keep character names, place names, proper nouns and named items untranslated. "
+        "Speaker labels like 'NAME:' stay unchanged.\n"
+        "- Generic game terms ARE translated idiomatically (health -> can, quest -> görev, checkpoint -> kontrol noktası, "
+        "skill tree -> yetenek ağacı, equip -> kuşan).\n"
     )
+    if tgt == "tr":
+        base += (
+            "- Turkish grammar: correct vowel harmony and case endings (e.g. 'to the boat' -> 'tekneye', "
+            "'from the house' -> 'evden'). Suffixes on proper nouns use an apostrophe: Kratos'a, Midgard'da, Atreus'un.\n"
+            "- Imperatives use the proper 2nd-person form (sen for companions, siz for groups/formal).\n"
+            "- Keep the original punctuation (! ? , ... and quotes) and Turkish capitalization.\n"
+            "Examples:\n"
+            "'Get to the boat, quickly!' -> 'Tekneye git, çabuk!'\n"
+            "'Kratos, we need to go to Midgard.' -> 'Kratos, Midgard'a gitmemiz gerekiyor.'\n"
+            "'Don't let him reach the gate!' -> 'Kapıya ulaşmasına izin verme!'\n"
+        )
+    base += "- If the input is OCR noise with no meaning, output exactly an empty string.\n"
+    return base + glossary_line
 
 
 # ---------- App ----------
@@ -159,8 +180,9 @@ async def translate(payload: TranslateIn):
     if not text:
         raise HTTPException(status_code=400, detail="Boş metin çevrilemez.")
     glossary = sorted({g.strip() for g in payload.glossary if g.strip()})
+    model = TRANSLATE_MODEL_BEST if payload.quality == "best" else TRANSLATE_MODEL
     key = hashlib.sha256(
-        f"{payload.source_lang}|{payload.target_lang}|{'|'.join(glossary)}|{text.lower()}".encode()
+        f"{PROMPT_VERSION}|{model}|{payload.source_lang}|{payload.target_lang}|{'|'.join(glossary)}|{text.lower()}".encode()
     ).hexdigest()
     started = datetime.now(timezone.utc)
 
@@ -173,7 +195,7 @@ async def translate(payload: TranslateIn):
             api_key=EMERGENT_LLM_KEY,
             session_id=f"tr-{uuid.uuid4()}",
             system_message=build_system_prompt(payload.source_lang, payload.target_lang, glossary),
-        ).with_model(TRANSLATE_PROVIDER, TRANSLATE_MODEL)
+        ).with_model(TRANSLATE_PROVIDER, model)
         try:
             # Non-streaming on purpose: the TV protocol needs one complete subtitle string per message.
             translated = normalize(str(await asyncio.wait_for(chat.send_message(UserMessage(text=text)), timeout=15)))
@@ -187,7 +209,7 @@ async def translate(payload: TranslateIn):
             key=key,
             source_text=text,
             translated_text=translated,
-            model=TRANSLATE_MODEL,
+            model=model,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         with suppress(Exception):
@@ -215,7 +237,7 @@ async def translate(payload: TranslateIn):
         translated_text=translated,
         cached=cached,
         latency_ms=latency_ms,
-        engine=f"{TRANSLATE_PROVIDER}/{TRANSLATE_MODEL}",
+        engine=f"{TRANSLATE_PROVIDER}/{model}",
         history_id=history_id,
     )
 

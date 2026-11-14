@@ -12,6 +12,7 @@ import { PipelineProvider } from "@/src/pipeline/PipelineProvider";
 import { queryClient } from "@/src/query-client";
 import { SettingsProvider } from "@/src/settings";
 import { useTheme } from "@/src/theme";
+import { TvServerProvider } from "@/src/tv/TvServerProvider";
 
 LogBox.ignoreAllLogs(true);
 
@@ -32,6 +33,7 @@ export default function RootLayout() {
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <SettingsProvider>
+            <TvServerProvider>
             <PipelineProvider>
               <KeyboardProvider>
                 <StatusBar style="light" />
@@ -42,6 +44,7 @@ export default function RootLayout() {
                 </Stack>
               </KeyboardProvider>
             </PipelineProvider>
+            </TvServerProvider>
           </SettingsProvider>
         </QueryClientProvider>
       </ErrorBoundary>

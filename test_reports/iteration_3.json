@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 3 (TV WebSocket UI + translation quality). Backend: 19/19 pytest passed (10 regression + 9 new in test_translate_quality.py). 'best' is the default (sonnet-4.5) and 'fast' uses haiku-4.5. 'Get to the boat, quickly!' -> 'Tekneye git, çabuk!' in both modes. 'Kratos, we need to go to Midgard.' with glossary -> \"Kratos, Midgard'a gitmemiz gerekiyor.\" in both modes. New sentences that are not in the prompt also translate well: 'Mağaraya git, acele et!', \"Atreus, şafaktan önce Alfheim'a ulaşmalıyız.\", 'İpi tut ve yukarı tırman!'. Best mode takes about 0.9-1.5s. Empty text -> 400, more than 600 chars -> 422, invalid quality -> 422, a repeat -> cached=true (the cache is per quality), and the history endpoints work. Frontend was tested in Expo web at 1280x800 and 390x844, and all 5 requested items pass. Dashboard: the TV sunucusu panel shows dash-native-missing and dash-state-running 'Yerel modül yok'. start-server, test-tv, manual-send and manual-clear all have aria-disabled=true. manual-send stays disabled after typing text. Forced clicks do nothing: last-sent stays '—' and nothing fakes a success. The PS5, Remote Play and OCR cards say 'Sonraki aşama'. Bağlantı: connect-tv-server-panel and its native notice are present. discover, connect and register each show ps5-message 'Bu özellik henüz uygulanmadı ... Sahte bağlantı gösterilmiyor.' tv-ip-input validation works: 'abc' is rejected, and 192.168.1.77 stays after a reload; the original empty value was restored afterwards. Çeviri: the manual OCR input gives the Turkish text. tv-payload-text is valid JSON {\"text\":\"Tekneye git, çabuk!\"}, and tv-payload-not-sent shows the honest message. Dedupe ('Aynı altyazı, atlandı'), the noise filter ('Filtrelendi: Anlamlı kelime yok'), the empty+delay clear (payload {\"text\":\"\"}), the clear button and the history list all work. Ayarlar: quality-fast toggles and persists after reload; I confirmed this from the network request body quality='fast', then restored 'best'. battery-exempt-badge shows 'Yerel Derleme Gerektirir' and the battery button is hidden. Steppers and toggles still work. Overlap detection found 0 overlaps on all 4 tabs at 390. No deprecated Expo packages and no react-native SafeAreaView imports were found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/translate", "issue": "The few-shot examples in the prompt are exactly the acceptance sentences (boat, Kratos/Midgard), so those two tests do not prove the model generalises. I checked 3 new sentences by hand and they were good."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (390 wide)", "issues": ["pipeline-flow is a horizontal ScrollView with showsHorizontalScrollIndicator=false. The 'TV' chip is fully off-screen and 'Çeviri' is clipped, with no hint that the row scrolls. Use flexWrap or show the indicator. (app/(tabs)/index.tsx:91)"]},
+      {"screen": "Ayarlar", "issues": ["The quality-best and quality-fast chips are 36px high, below the 44px touch target.", "The chips have no accessibilityState={{selected}}, so screen readers and tests cannot read which one is selected."]},
+      {"screen": "TvServerPanel", "issues": ["Disabled primary buttons (Sunucuyu başlat, Gönder) are drawn in dimmed amber that still looks tappable. A clearer disabled style would help.", "The 'Son bağlantı hatası' value 'Yok' sits right-aligned on its own line while the label is left-aligned."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_translate_api.py", "/app/backend/tests/test_translate_quality.py", "/app/test_reports/pytest/pytest_results_iter3.xml"],
+  "action_items": [
+    "Optional: make pipeline-flow wrap, or show that it scrolls, on phone widths.",
+    "Optional: raise Chip minHeight to 44 and add accessibilityState={{ selected }} to Chip.",
+    "Optional: TvServerProvider keeps notifPermission at 'unknown' after a denial (not 'never ask again') and after an app restart, so the notification explanation appears again on every start on Android 13+. Consider saving the choice."
+  ],
+  "critical_code_review_comments": [
+    "TvServerProvider.test and sendManual set busy without try/finally. send() catches errors, so this is safe today but fragile.",
+    "The auto-start effect starts the server without the notification explanation/permission flow on Android 13+. This is acceptable (the server works without the notification), but the notification will not show until the user grants permission.",
+    "The PipelineProvider seq/abort handling correctly stops stale translations from overwriting newer ones, and an empty result clears the TV."
+  ],
+  "updated_files": ["/app/backend/tests/test_translate_quality.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Manual-OCR UI tests added a few subtitle_history rows (e.g. 'TEST Kratos, we need to go to Midgard.', 'Hold on, I'm coming!', 'TEST Light the torch near the door ...'). They were not deleted because only the bulk DELETE /api/history exists and it would wipe user data. Translation cache entries were also added.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest with EXPO_PUBLIC_BACKEND_URL exported. Do not run DELETE /api/history (it is a bulk delete). Chips have no aria-selected; check the selected quality through the /api/translate request body. The screenshot path must be a plain filename (no f-string with dict indexing). Native module is absent in web by design: 'Yerel modül yok' and 'Yerel Derleme Gerektirir' are expected.",
+  "rca_of_issue": ""
+}

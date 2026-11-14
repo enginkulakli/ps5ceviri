@@ -10,7 +10,6 @@ import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
-import { nativeAvailable } from "@/src/native/bridge";
 import { usePipeline } from "@/src/pipeline/PipelineProvider";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -60,8 +59,12 @@ export default function TranslateScreen() {
         <Text testID="tv-payload-text" style={styles.mono}>
           {state.lastPayload ?? '{"text":""}'}
         </Text>
-        {state.lastPayload != null && !state.payloadDelivered ? (
-          <Notice kind="warning" text="Gönderilmedi: tablette WebSocket sunucusu (yerel modül) bu önizlemede yok." testID="tv-payload-not-sent" />
+        {state.payloadStatus === "sent" ? <Notice kind="success" text="TV'ye gönderildi." testID="tv-payload-sent" /> : null}
+        {state.payloadStatus === "duplicate" ? <Notice kind="info" text="Aynı altyazı zaten TV'de; tekrar gönderilmedi." testID="tv-payload-duplicate" /> : null}
+        {state.payloadStatus === "no_clients" ? <Notice kind="warning" text="Bağlı TV yok; TV bağlandığında bu altyazı otomatik gönderilecek." testID="tv-payload-no-clients" /> : null}
+        {state.payloadStatus === "not_running" ? <Notice kind="warning" text="TV sunucusu kapalı. Durum sekmesinden başlatın." testID="tv-payload-not-running" /> : null}
+        {state.payloadStatus === "no_native" ? (
+          <Notice kind="warning" text="Gönderilmedi: TV sunucusu yalnızca Android APK'da çalışır (Expo Go / web önizlemede yok)." testID="tv-payload-not-sent" />
         ) : null}
       </Card>
 
@@ -83,9 +86,7 @@ export default function TranslateScreen() {
         <Text testID="pipeline-stats" style={styles.meta}>
           Alınan {state.stats.received} · Çevrilen {state.stats.translated} · Tekrar atlanan {state.stats.skippedSame} · Filtrelenen {state.stats.ignored}
         </Text>
-        {!nativeAvailable ? (
-          <Notice kind="info" text="Bu test gerçek çeviri, tekrar engelleme, gürültü filtresi ve temizleme gecikmesini çalıştırır. Gerçek OCR kaynağı (PS5 görüntüsü) yerel modülle bağlanacaktır." />
-        ) : null}
+        <Notice kind="info" text="Bu test gerçek çeviri, tekrar engelleme, gürültü filtresi ve temizleme gecikmesini çalıştırır. Gerçek OCR kaynağı (PS5 görüntüsü) sonraki aşamada bağlanacak." />
       </Card>
     </View>
   );

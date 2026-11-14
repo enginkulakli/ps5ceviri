@@ -10,9 +10,10 @@ import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button, Card, Chip, Field, Notice, SectionTitle, StatusBadge, Stepper, ToggleRow } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
-import { nativeAvailable } from "@/src/native/bridge";
+import { hasNative } from "@/src/native/bridge";
 import { DEFAULT_SETTINGS, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useTvServer } from "@/src/tv/TvServerProvider";
 
 const SOURCE = [
   { code: "en", label: "İngilizce" },
@@ -34,6 +35,7 @@ export default function SettingsScreen() {
   const wide = width >= 900;
   const { settings: s, update } = useSettings();
   const [glossary, setGlossary] = useState(s.glossary.join(", "));
+  const tv = useTvServer();
 
   const left = (
     <View style={wide ? { flex: 1 } : undefined}>
@@ -63,12 +65,21 @@ export default function SettingsScreen() {
             <StatusBadge kind="ready" />
           </View>
         </Pressable>
+        {s.engine === "online" ? (
+          <View style={{ gap: space.sm }}>
+            <Text style={styles.label}>Çevrimiçi çeviri kalitesi</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+              <Chip testID="quality-best" label="Kaliteli (~1 sn)" selected={s.translateQuality === "best"} onPress={() => update({ translateQuality: "best" })} />
+              <Chip testID="quality-fast" label="Hızlı (~0,5 sn)" selected={s.translateQuality === "fast"} onPress={() => update({ translateQuality: "fast" })} />
+            </ScrollView>
+          </View>
+        ) : null}
         <Pressable testID="engine-offline-option" onPress={() => update({ engine: "offline" })} style={[styles.option, s.engine === "offline" && styles.optionOn]}>
           <Ionicons name={s.engine === "offline" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={styles.optTitle}>Cihaz içi çevrimdışı (ML Kit, ücretsiz)</Text>
             <Text style={styles.meta}>İnternet gerekmez, veri cihazdan çıkmaz. Kalite orta. ~30 MB model bir kez indirilir.</Text>
-            <StatusBadge kind={nativeAvailable ? "ready" : "native"} />
+            <StatusBadge kind={hasNative("translateOffline") ? "ready" : "native"} label={hasNative("translateOffline") ? undefined : "Henüz uygulanmadı"} />
           </View>
         </Pressable>
         <Field
@@ -106,10 +117,22 @@ export default function SettingsScreen() {
 
       <SectionTitle title="Bağlantı ve arka plan" />
       <Card>
-        <ToggleRow testID="auto-connect-toggle" label="Otomatik bağlantı" hint="Açılışta kayıtlı PS5'e ve TV sunucusuna bağlan" value={s.autoConnect} onChange={(v) => update({ autoConnect: v })} />
-        <ToggleRow testID="foreground-service-toggle" label="Arka planda çalış" hint="Kalıcı bildirimli foreground service; ekran kapalıyken de devam eder" value={s.foregroundService} onChange={(v) => update({ foregroundService: v })} />
+        <ToggleRow testID="auto-connect-toggle" label="Otomatik bağlantı" hint="Uygulama açılınca TV sunucusunu başlat; arka planda çalış açıksa cihaz yeniden başlayınca da başlatır" value={s.autoConnect} onChange={(v) => update({ autoConnect: v })} />
+        <ToggleRow testID="foreground-service-toggle" label="Arka planda çalış" hint="TV sunucusu kalıcı bildirimli foreground service olarak çalışır; ekran kapalıyken de devam eder" value={s.foregroundService} onChange={(v) => update({ foregroundService: v })} />
         <ToggleRow testID="wifi-lock-toggle" label="Wi-Fi düşük gecikme kilidi" hint="Oturum sırasında Wi-Fi güç tasarrufunu engeller" value={s.keepWifiAwake} onChange={(v) => update({ keepWifiAwake: v })} />
-        <Notice kind="warning" text="Arka plan çalışma ayarları yerel modül yüklendiğinde uygulanır. Samsung cihazlarda Ayarlar → Pil → Arka plan kullanım sınırları bölümünden uygulamayı 'Hiç uyutma' listesine ekleyin." />
+        <View style={{ gap: space.sm }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Text style={styles.optTitle}>Pil optimizasyonu</Text>
+            <StatusBadge testID="battery-exempt-badge"
+              kind={!tv.available ? "native" : tv.batteryExempt ? "ready" : "idle"}
+              label={!tv.available ? undefined : tv.batteryExempt ? "Muaf" : "Kısıtlı olabilir"} />
+          </View>
+          <Text style={styles.meta}>Samsung pil yöneticisi uzun süre arka planda kalan uygulamaları uyutabilir. Muaf tutarsanız TV sunucusu ekran kapalıyken de kesintisiz çalışır.</Text>
+          {tv.available && !tv.batteryExempt ? (
+            <Button testID="battery-exempt-button" label="Pil optimizasyonundan muaf tut" icon="battery-charging-outline" variant="secondary" onPress={tv.requestBatteryExemption} />
+          ) : null}
+          <Notice kind="info" text="Samsung cihazlarda ayrıca: Ayarlar → Pil → Arka plan kullanım sınırları → 'Hiç uyutulmayan uygulamalar' listesine ekleyin." />
+        </View>
         <Button testID="open-app-settings-button" label="Uygulama ayarlarını aç" icon="open-outline" variant="secondary" onPress={() => Linking.openSettings()} />
         <Button testID="reset-settings-button" label="Varsayılanlara dön" icon="refresh-outline" variant="ghost"
           onPress={() => { update({ ...DEFAULT_SETTINGS, consoles: s.consoles, tvIp: s.tvIp }); setGlossary(""); }} />

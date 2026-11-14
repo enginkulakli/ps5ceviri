@@ -5,12 +5,14 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/src/components/ScreenHeader";
+import { TvServerPanel } from "@/src/components/TvServerPanel";
 import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
-import { NATIVE_REQUIRED_MESSAGE, nativeAvailable, nativeModule } from "@/src/native/bridge";
+import { hasNative, nativeModule, NOT_IMPLEMENTED_MESSAGE, Ps5TranslatorNativeModule } from "@/src/native/bridge";
 import { PSN_ACCOUNT_KEY, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
+import { useTvServer } from "@/src/tv/TvServerProvider";
 import { storage } from "@/src/utils/storage";
 
 const IP_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
@@ -37,7 +39,6 @@ export default function ConnectScreen() {
   const [tvIpErr, setTvIpErr] = useState<string | null>(null);
   const [tvIpDraft, setTvIpDraft] = useState<string | null>(null);
   const [psMsg, setPsMsg] = useState<Msg>(null);
-  const [tvMsg, setTvMsg] = useState<Msg>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const loadNetwork = async () => {
@@ -55,9 +56,9 @@ export default function ConnectScreen() {
     storage.secureGet(PSN_ACCOUNT_KEY, null).then((v) => setAccountSaved(!!v));
   }, []);
 
-  const needNative = async (key: string, setMsg: (m: Msg) => void, fn: () => Promise<string>) => {
-    if (!nativeModule) {
-      setMsg({ kind: "warning", text: NATIVE_REQUIRED_MESSAGE });
+  const needNative = async (key: string, setMsg: (m: Msg) => void, fn: () => Promise<string>, nativeFn: keyof Ps5TranslatorNativeModule) => {
+    if (!hasNative(nativeFn)) {
+      setMsg({ kind: "warning", text: NOT_IMPLEMENTED_MESSAGE });
       return;
     }
     setBusy(key);
@@ -94,21 +95,23 @@ export default function ConnectScreen() {
     setPsMsg(ok ? { kind: "success", text: "PSN Account ID cihazın güvenli deposuna kaydedildi." } : { kind: "error", text: "Güvenli depoya yazılamadı." });
   };
 
-  const wsUrl = `ws://${tabletIp ?? "TABLET_IP"}:${settings.tvPort}`;
+  const tvServer = useTvServer();
+  const shownIp = tvServer.state?.localIp ?? tabletIp;
+  const wsUrl = `ws://${shownIp ?? "TABLET_IP"}:${settings.tvPort}`;
 
   const ps5 = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="PS5 bağlantısı" subtitle="chiaki-ng motoru · yerel modül" />
+      <SectionTitle title="PS5 bağlantısı" subtitle="chiaki-ng motoru · sonraki aşama" />
       <Card testID="ps5-section">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Remote Play motoru</Text>
-          <StatusBadge kind={nativeAvailable ? "ready" : "native"} testID="ps5-engine-badge" />
+          <StatusBadge kind="native" label="Henüz uygulanmadı (sonraki aşama)" testID="ps5-engine-badge" />
         </View>
         <Button testID="discover-consoles-button" label="Ağda konsol bul" icon="search-outline" variant="secondary" loading={busy === "discover"}
           onPress={() => needNative("discover", setPsMsg, async () => {
-            const list = await nativeModule!.discoverConsoles(3000);
+            const list = await nativeModule!.discoverConsoles!(3000);
             return list.length ? `${list.length} konsol bulundu: ${list.map((c) => `${c.name} (${c.host})`).join(", ")}` : "Konsol bulunamadı. PS5 açık ve aynı ağda mı?";
-          })}
+          }, "discoverConsoles")}
         />
         <View style={styles.divider} />
         <Text style={styles.label}>Manuel ekle</Text>
@@ -148,11 +151,11 @@ export default function ConnectScreen() {
               const acc = await storage.secureGet(PSN_ACCOUNT_KEY, null);
               if (!acc) throw new Error("Önce PSN Account ID kaydedin.");
               if (!/^\d{8}$/.test(pin)) throw new Error("PIN 8 haneli olmalıdır.");
-              const r = await nativeModule!.registerConsole(c.host, String(acc), pin);
+              const r = await nativeModule!.registerConsole!(c.host, String(acc), pin);
               await storage.secureSet(`regist_${c.id}`, JSON.stringify(r));
               update({ consoles: settings.consoles.map((x) => (x.id === c.id ? { ...x, registered: true } : x)) });
               return "Kayıt başarılı.";
-            })}
+            }, "registerConsole")}
           />
         </View>
         <View style={styles.btnRow}>
@@ -160,12 +163,12 @@ export default function ConnectScreen() {
             onPress={() => needNative("connect", setPsMsg, async () => {
               const c = settings.consoles.find((x) => x.registered);
               if (!c) throw new Error("Kayıtlı konsol yok.");
-              await nativeModule!.startSession(c.host);
+              await nativeModule!.startSession!(c.host);
               return "Remote Play oturumu başladı (görüntü tablette gösterilmez).";
-            })}
+            }, "startSession")}
           />
           <Button testID="disconnect-ps5-button" label="Bağlantıyı kes" icon="stop-outline" variant="secondary" style={{ flex: 1 }}
-            onPress={() => needNative("disconnect", setPsMsg, async () => { await nativeModule!.stopSession(); return "Oturum kapatıldı."; })}
+            onPress={() => needNative("disconnect", setPsMsg, async () => { await nativeModule!.stopSession!(); return "Oturum kapatıldı."; }, "stopSession")}
           />
         </View>
         {psMsg ? <Notice kind={psMsg.kind} text={psMsg.text} testID="ps5-message" /> : null}
@@ -179,40 +182,19 @@ export default function ConnectScreen() {
       <Card testID="tv-section">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Tablet IP adresi</Text>
-          <Button testID="refresh-ip-button" label="Yenile" icon="refresh-outline" variant="ghost" style={{ minHeight: 44 }} onPress={loadNetwork} />
+          <Button testID="refresh-ip-button" label="Yenile" icon="refresh-outline" variant="ghost" style={{ minHeight: 44 }} onPress={() => { loadNetwork(); tvServer.refresh(); }} />
         </View>
-        <Text testID="tablet-ip-text" style={styles.ip}>{tabletIp ?? "Alınamadı"}</Text>
+        <Text testID="tablet-ip-text" style={styles.ip}>{shownIp ?? "Alınamadı"}</Text>
         <Text style={styles.meta}>Ağ: {wifi || "—"}</Text>
         {Platform.OS === "web" ? <Notice kind="info" text="Web önizlemede gösterilen IP sunucunun IP'sidir, TV erişemez. Gerçek yerel IP tablette görünür." /> : null}
-        <View style={styles.urlBox}>
-          <Text style={styles.label}>TV uygulamasında kullanılacak adres</Text>
-          <Text testID="ws-url-text" style={styles.mono}>{wsUrl}</Text>
-          <Text style={styles.mono}>{'{"text":"Türkçe altyazı"}'}</Text>
-        </View>
-        <View style={styles.rowBetween}>
-          <Text style={styles.label}>WebSocket sunucusu</Text>
-          <StatusBadge kind={nativeAvailable ? "idle" : "native"} testID="ws-server-badge" />
-        </View>
         <Field testID="tv-ip-input" label="TV IP adresi (sadece bu IP kabul edilir)" placeholder="192.168.1.50 — boş: herkes" keyboardType="numbers-and-punctuation" autoCapitalize="none"
           value={tvIpDraft ?? settings.tvIp} error={tvIpErr}
           onChangeText={(v) => { setTvIpDraft(v); const t = v.trim(); if (!t || IP_RE.test(t)) { update({ tvIp: t }); setTvIpErr(null); } else setTvIpErr("Geçersiz IPv4 adresi (kaydedilmedi)"); }}
         />
-        <View style={styles.btnRow}>
-          <Button testID="start-ws-server-button" label="Sunucuyu başlat" icon="power-outline" style={{ flex: 1 }} loading={busy === "ws"} disabled={!!tvIpErr}
-            onPress={() => needNative("ws", setTvMsg, async () => { await nativeModule!.startTvServer(settings.tvPort, settings.tvIp || null); return `Sunucu ${wsUrl} adresinde dinliyor.`; })}
-          />
-          <Button testID="test-tv-button" label="Bağlantıyı test et" icon="pulse-outline" variant="secondary" style={{ flex: 1 }} loading={busy === "test"}
-            onPress={() => needNative("test", setTvMsg, async () => {
-              const n = await nativeModule!.getTvClientCount();
-              if (n === 0) throw new Error("Bağlı TV yok. TV uygulamasında adresi kontrol edin.");
-              await nativeModule!.sendSubtitle("Bağlantı testi başarılı");
-              return `${n} TV bağlı, test altyazısı gönderildi.`;
-            })}
-          />
-        </View>
-        {tvMsg ? <Notice kind={tvMsg.kind} text={tvMsg.text} testID="tv-message" /> : null}
-        <Notice kind="info" text="Bağlantı kopması durumunda yerel sunucu açık kalır ve TV uygulaması yeniden bağlandığında son altyazı tekrar gönderilir." />
+        <Text style={styles.meta}>TV uygulaması şu adrese bağlanır: {wsUrl} · mesaj formatı {'{"text":"..."}'}</Text>
       </Card>
+      <View style={{ height: space.md }} />
+      <TvServerPanel idPrefix="connect" />
     </View>
   );
 

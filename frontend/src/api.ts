@@ -38,12 +38,13 @@ export async function translateOnline(
   source: string,
   target: string,
   glossary: string[],
+  quality: "fast" | "best",
   signal?: AbortSignal,
 ): Promise<TranslateResult> {
   const res = await fetch(`${BASE}/translate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, source_lang: source, target_lang: target, glossary }),
+    body: JSON.stringify({ text, source_lang: source, target_lang: target, glossary, quality }),
     signal,
   });
   return handle(res);

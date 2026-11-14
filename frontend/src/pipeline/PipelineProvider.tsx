@@ -2,9 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { translateOnline } from "@/src/api";
-import { nativeAvailable, nativeModule } from "@/src/native/bridge";
+import { hasNative, nativeModule, SendStatus } from "@/src/native/bridge";
 import { SubtitleTracker, tvPayload } from "@/src/pipeline/subtitle";
 import { useSettings } from "@/src/settings";
+import { useTvServer } from "@/src/tv/TvServerProvider";
 
 export type EngineState = "idle" | "translating" | "ok" | "error";
 
@@ -17,6 +18,7 @@ export type PipelineState = {
   lastCached: boolean;
   lastPayload: string | null;
   payloadDelivered: boolean;
+  payloadStatus: SendStatus | "no_native" | null;
   lastEvent: string;
   stats: { received: number; translated: number; skippedSame: number; ignored: number };
 };
@@ -30,6 +32,7 @@ const INITIAL: PipelineState = {
   lastCached: false,
   lastPayload: null,
   payloadDelivered: false,
+  payloadStatus: null,
   lastEvent: "Bekleniyor",
   stats: { received: 0, translated: 0, skippedSame: 0, ignored: 0 },
 };
@@ -52,17 +55,21 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
     tracker.current.configure({ repeatWindowMs: settings.repeatWindowMs, sensitivity: settings.sensitivity });
   }, [settings.repeatWindowMs, settings.sensitivity]);
 
-  const sendToTv = useCallback(async (text: string) => {
-    const payload = tvPayload(text);
-    let delivered = false;
-    if (nativeAvailable && nativeModule) {
-      try {
-        await nativeModule.sendSubtitle(text);
-        delivered = true;
-      } catch {}
-    }
-    setState((s) => ({ ...s, lastPayload: payload, payloadDelivered: delivered }));
-  }, []);
+  const tv = useTvServer();
+  const tvSend = tv.send;
+  const sendToTv = useCallback(
+    async (text: string) => {
+      const payload = tvPayload(text);
+      const r = await tvSend(text);
+      setState((s) => ({
+        ...s,
+        lastPayload: payload,
+        payloadStatus: r ? r.status : "no_native",
+        payloadDelivered: r?.status === "sent" || r?.status === "duplicate",
+      }));
+    },
+    [tvSend],
+  );
 
   const runTranslation = useCallback(
     async (text: string) => {
@@ -77,12 +84,12 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
         let latency = 0;
         let cached = false;
         if (s.engine === "offline") {
-          if (!nativeModule) throw new Error("Çevrimdışı çeviri (ML Kit) yerel Android derlemesi gerektirir. Ayarlardan çevrimiçi motoru seçin.");
+          if (!nativeModule?.translateOffline || !hasNative("translateOffline")) throw new Error("Çevrimdışı çeviri (ML Kit) henüz uygulanmadı. Ayarlardan çevrimiçi motoru seçin.");
           const t0 = Date.now();
           translated = await nativeModule.translateOffline(text, s.sourceLang, s.targetLang);
           latency = Date.now() - t0;
         } else {
-          const r = await translateOnline(text, s.sourceLang, s.targetLang, s.glossary, controller.signal);
+          const r = await translateOnline(text, s.sourceLang, s.targetLang, s.glossary, s.translateQuality, controller.signal);
           translated = r.translated_text;
           latency = r.latency_ms;
           cached = r.cached;

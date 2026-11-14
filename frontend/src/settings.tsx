@@ -9,6 +9,7 @@ export type Settings = {
   sourceLang: string;
   targetLang: string;
   engine: "online" | "offline";
+  translateQuality: "fast" | "best";
   ocrRegion: OcrRegion;
   ocrIntervalMs: number;
   sensitivity: number;
@@ -27,6 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceLang: "en",
   targetLang: "tr",
   engine: "online",
+  translateQuality: "best",
   ocrRegion: { x: 0, y: 0.72, w: 1, h: 0.28 },
   ocrIntervalMs: 300,
   sensitivity: 0.5,

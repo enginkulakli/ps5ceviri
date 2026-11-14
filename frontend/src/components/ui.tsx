@@ -190,6 +190,9 @@ export function Chip({ label, selected, onPress, testID }: { label: string; sele
     <Pressable
       testID={testID}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      hitSlop={{ top: 4, bottom: 4 }}
       style={[styles.chip, { backgroundColor: selected ? colors.brandTertiary : colors.surfaceTertiary, borderColor: selected ? colors.brandPrimary : colors.border }]}
     >
       <Text style={[styles.chipText, { color: selected ? colors.onBrandTertiary : colors.onSurfaceTertiary }]}>{label}</Text>

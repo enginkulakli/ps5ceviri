@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.ps5translator.Ps5TranslatorModule"]
+  }
+}

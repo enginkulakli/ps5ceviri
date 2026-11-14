@@ -22,8 +22,14 @@ Android tablet (Galaxy Tab S9 Ultra) app: connect to PS5 via Remote Play in back
 - Phase 2 partial: UI, settings, OCR region editor, pipeline logic, TV payload format, online translation + cache + history, tablet IP display
 - Tested: iteration 1 & 2 all pass
 
+## Task 1 — Android TV server (2026-06)
+- Expo local module `frontend/modules/ps5-translator` (Kotlin): Java-WebSocket server :8787 in foreground service (connectedDevice), wifi/wake locks, network change handling, boot receiver, allow-list, replay-on-reconnect, duplicate suppression
+- JS: TvServerProvider + TvServerPanel (Dashboard + Bağlantı): real state, start/stop/test/manual send/empty send, notification permission pre-explanation, battery exemption
+- Translation prompt v2 (Turkish grammar, examples), quality setting fast(Haiku)/best(Sonnet 4.5, default)
+- Tests: Kotlin core on JVM 24/24 incl. 90s stability; Android-specific Kotlin compiled vs android-36; full APK build must happen via Emergent Publish (container is ARM64). Details: /app/memory/ANDROID_TV_SERVER.md
+
 ## Backlog
-- P0: Expo local native module (Kotlin): Java-WebSocket server :8787 + foreground service (connectedDevice) + WifiLock
+- P0: Verify first APK build + real-device checklist (ANDROID_TV_SERVER.md)
 - P0: chiaki-ng lib via NDK/CMake + JNI: discovery, registration (Account ID + PIN), session
 - P0: MediaCodec → ImageReader hidden decode, ROI Y-plane copy, change detection, ML Kit OCR
 - P1: ML Kit offline EN→TR translation; PSN sign-in flow for Account ID

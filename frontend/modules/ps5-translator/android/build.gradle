@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.ps5translator'
+version = '0.2.0'
+
+android {
+  namespace "expo.modules.ps5translator"
+  defaultConfig {
+    versionCode 2
+    versionName "0.2.0"
+  }
+}
+
+dependencies {
+  // MIT licensed WebSocket server used for the Tizen TV link (ws://TABLET_IP:8787)
+  implementation "org.java-websocket:Java-WebSocket:1.6.0"
+}

@@ -16,10 +16,10 @@ export function ScreenHeader({ title, subtitle, back }: { title: string; subtitl
   const { state } = usePipeline();
 
   const banner = !nativeAvailable
-    ? { color: colors.warning, text: "Önizleme modu · Yerel motor yok · Sadece çeviri hattı çalışır" }
+    ? { color: colors.warning, text: "Önizleme modu · TV sunucusu yalnızca Android APK'da çalışır" }
     : state.engineState === "error"
       ? { color: colors.error, text: "Çeviri hatası" }
-      : { color: colors.success, text: "Yerel motor yüklü" };
+      : { color: colors.success, text: "Android yerel modülü yüklü · TV sunucusu kullanılabilir" };
 
   return (
     <View style={[styles.wrap, { paddingTop: insets.top + space.sm }]}>
