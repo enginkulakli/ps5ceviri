@@ -1,4 +1,3 @@
-
 name: Android APK Build
 
 on:
@@ -25,6 +24,8 @@ jobs:
 
       - name: Android SDK kur
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Bağımlılıkları yükle
         working-directory: frontend
