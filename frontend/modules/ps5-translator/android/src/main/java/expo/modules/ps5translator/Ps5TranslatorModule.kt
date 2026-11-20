@@ -47,6 +47,66 @@ class Ps5TranslatorModule : Module() {
       toBundle(ServerController.core.snapshot())
     }
 
+    AsyncFunction("hasOverlayPermission") {
+      Settings.canDrawOverlays(context)
+    }
+
+    AsyncFunction("requestOverlayPermission") {
+      context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        .setData(Uri.parse("package:${context.packageName}"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    AsyncFunction("showTranslationOverlay") { text: String ->
+      mainHandler.post { TranslationOverlay.show(context, text) }
+    }
+
+    AsyncFunction("startScreenCapture") {
+      val intent = Intent(context, CapturePermissionActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+    }
+
+    AsyncFunction("stopScreenCapture") {
+      context.stopService(Intent(context, ScreenCaptureService::class.java))
+    }
+
+    AsyncFunction("startBackgroundTranslation") {
+      BackgroundTranslator.start(context.applicationContext)
+    }
+
+    AsyncFunction("stopBackgroundTranslation") {
+      BackgroundTranslator.stop(context.applicationContext)
+    }
+
+    AsyncFunction("getBackgroundTranslationStatus") {
+      Bundle().apply {
+        putBoolean("enabled", BackgroundTranslator.enabled)
+        putString("status", BackgroundTranslator.status)
+        putString("english", BackgroundTranslator.lastEnglish)
+        putString("turkish", BackgroundTranslator.lastTurkish)
+      }
+    }
+
+    AsyncFunction("getScreenCaptureStatus") {
+      Bundle().apply {
+        putBoolean("hasFrame", ScreenCaptureFrames.latest != null)
+        putString("error", ScreenCaptureFrames.lastError)
+      }
+    }
+
+    AsyncFunction("recognizeLatestScreen") {
+      val frame = ScreenCaptureFrames.latest
+      if (frame.isNullOrEmpty()) ArrayList<Bundle>()
+      else ScreenTextRecognizer.recognize(frame)
+    }
+
+    // OCR is local to the device; returns all detected blocks and bounding boxes.
+    // Capture permission and frame acquisition are handled separately.
+    AsyncFunction("recognizeScreenFrame") { base64Frame: String ->
+      ScreenTextRecognizer.recognize(base64Frame)
+    }
+
     AsyncFunction("getLocalIpAddress") {
       NetworkUtils.localIpv4(context)
     }

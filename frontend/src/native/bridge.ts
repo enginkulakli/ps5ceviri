@@ -42,6 +42,15 @@ export interface Ps5TranslatorNativeModule {
   isIgnoringBatteryOptimizations(): Promise<boolean>;
   requestIgnoreBatteryOptimizations(): Promise<void>;
   addListener(event: "onServerState", cb: (s: TvServerState) => void): { remove: () => void };
+  hasOverlayPermission(): Promise<boolean>;
+  requestOverlayPermission(): Promise<void>;
+  showTranslationOverlay(text: string): Promise<void>;
+  startScreenCapture(): Promise<void>;
+  startBackgroundTranslation(): Promise<void>;
+  stopBackgroundTranslation(): Promise<void>;
+  getBackgroundTranslationStatus(): Promise<{enabled: boolean; status: string; english: string; turkish: string}>;
+  stopScreenCapture(): Promise<void>;
+  recognizeLatestScreen(): Promise<Array<{text: string; left: number; top: number; right: number; bottom: number}>>;
   // ---- later phases (not implemented natively yet) ----
   discoverConsoles?(timeoutMs: number): Promise<DiscoveredConsole[]>;
   registerConsole?(host: string, psnAccountIdBase64: string, pin: string): Promise<{ registKey: string; morning: string }>;

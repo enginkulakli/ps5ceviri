@@ -1,0 +1,78 @@
+name: Android OCR APK build
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feature/screen-ocr-foundation
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/android-ocr-build.yml'
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # GitHub ubuntu-latest runners already provide the Android SDK.
+      # setup-android@v3 currently requests the removed legacy "tools" package.
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          test -d "${ANDROID_HOME}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --version || "${ANDROID_HOME}/cmdline-tools/16.0/bin/sdkmanager" --version
+      - name: Install JS dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+      - name: Generate Android project
+        working-directory: frontend
+        run: npx expo prebuild --platform android --non-interactive
+      # Samsung Android 16 rejects some R8-optimized service bytecode with VerifyError.
+      # Keep release JS bundling, but disable R8 minification for this test build.
+      - name: Disable release bytecode shrinking (fix VerifyError)
+        working-directory: frontend/android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app/build.gradle")
+          s = p.read_text()
+          original = s
+          s, count = re.subn(r"minifyEnabled\s+[^\n]+", "minifyEnabled false", s)
+          if count < 1:
+              raise SystemExit("Cannot find minifyEnabled in generated app/build.gradle")
+          s = re.sub(r"shrinkResources\s+[^\n]+", "shrinkResources false", s)
+          p.write_text(s)
+          print(f"Disabled R8 in {count} build type(s)")
+          PY
+      # Debug APK expects Metro on a developer computer and may remain on the splash screen.
+      # Release APK embeds the JavaScript bundle and runs without Metro.
+      - name: Build standalone release APK
+        working-directory: frontend/android
+        run: |
+          chmod +x gradlew
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt ${attempt}/3"
+            if ./gradlew assembleRelease --stacktrace --refresh-dependencies; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Gradle failed after 3 attempts"
+              exit 1
+            fi
+            sleep 15
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5ceviri-ocr-standalone-release-apk
+          path: frontend/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
