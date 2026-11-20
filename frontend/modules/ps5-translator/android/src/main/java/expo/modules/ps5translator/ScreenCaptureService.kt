@@ -98,7 +98,9 @@ class ScreenCaptureService : Service() {
               val stream = ByteArrayOutputStream()
               cropped.compress(Bitmap.CompressFormat.JPEG, 65, stream)
               // Frame stays on-device; consumers can request the most recent frame.
-              ScreenCaptureFrames.latest = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+              val frame = Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+              ScreenCaptureFrames.latest = frame
+              BackgroundTranslator.process(applicationContext, frame)
             } finally { cropped.recycle() }
           } finally { bitmap.recycle() }
         } catch (_: Exception) {
