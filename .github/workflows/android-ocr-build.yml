@@ -58,7 +58,19 @@ jobs:
       # Release APK embeds the JavaScript bundle and runs without Metro.
       - name: Build standalone release APK
         working-directory: frontend/android
-        run: chmod +x gradlew && ./gradlew assembleRelease --stacktrace
+        run: |
+          chmod +x gradlew
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt ${attempt}/3"
+            if ./gradlew assembleRelease --stacktrace --refresh-dependencies; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Gradle failed after 3 attempts"
+              exit 1
+            fi
+            sleep 15
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ps5ceviri-ocr-standalone-release-apk
