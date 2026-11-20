@@ -19,4 +19,5 @@ dependencies {
   implementation "org.java-websocket:Java-WebSocket:1.6.0"
   // On-device Latin-script text recognition. No image upload required.
   implementation "com.google.mlkit:text-recognition:16.0.1"
+  implementation "com.google.mlkit:translate:17.0.3"
 }
