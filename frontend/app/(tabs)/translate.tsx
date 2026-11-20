@@ -1,7 +1,7 @@
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { requireOptionalNativeModule } from "expo-modules-core";
+import { requireOptionalNativeModule } from "expo";
 import { ActivityIndicator, RefreshControl, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,6 +28,8 @@ export default function TranslateScreen() {
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
   const nativeCapture = requireOptionalNativeModule<{
+    hasOverlayPermission(): Promise<boolean>;
+    requestOverlayPermission(): Promise<void>;
     startScreenCapture(): Promise<void>;
     stopScreenCapture(): Promise<void>;
     recognizeLatestScreen(): Promise<Array<{ text: string; left: number; top: number; right: number; bottom: number }>>;
@@ -100,6 +102,11 @@ export default function TranslateScreen() {
 
       <SectionTitle title="Ekranı otomatik oku" subtitle="Android ekran paylaşımı izni gerekir" />
       <Card>
+        <Button label="Ekran üstü gösterim izni ver" icon="layers-outline"
+          disabled={!nativeCapture}
+          onPress={async () => {
+            if (!(await nativeCapture?.hasOverlayPermission())) await nativeCapture?.requestOverlayPermission();
+          }} />
         <View style={styles.btnRow}>
           <Button label="Ekran okumayı başlat" icon="scan-outline"
             disabled={!nativeCapture || captureOn}
