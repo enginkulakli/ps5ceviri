@@ -104,6 +104,9 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
           lastEvent: cached ? "Önbellekten çevrildi" : "Çevrildi",
           stats: { ...st.stats, translated: st.stats.translated + 1 },
         }));
+        if (hasNative("showTranslationOverlay" as any)) {
+          await nativeModule?.showTranslationOverlay?.(translated).catch(() => {});
+        }
         await sendToTv(translated); // empty result (OCR noise) clears the TV instead of leaving a stale line
         qc.invalidateQueries({ queryKey: ["history"] });
       } catch (e: any) {
@@ -126,6 +129,7 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
           abort.current?.abort();
           tracker.current.reset();
           setState((st) => ({ ...st, english: "", turkish: "", engineState: "idle", lastLatencyMs: null, lastEvent: "Altyazı kayboldu, TV temizlendi" }));
+          nativeModule?.showTranslationOverlay?.("").catch(() => {});
           sendToTv("");
         }, settingsRef.current.clearDelayMs);
         return;
@@ -152,6 +156,7 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
     abort.current?.abort();
     tracker.current.reset();
     setState((st) => ({ ...INITIAL, stats: st.stats, lastEvent: "Temizlendi" }));
+    nativeModule?.showTranslationOverlay?.("").catch(() => {});
     sendToTv("");
   }, [sendToTv]);
 
