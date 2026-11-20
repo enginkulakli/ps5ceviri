@@ -1,6 +1,7 @@
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { requireOptionalNativeModule } from "expo-modules-core";
 import { ActivityIndicator, RefreshControl, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +23,35 @@ export default function TranslateScreen() {
   const wide = width >= 900;
   const { state, ingest, clear } = usePipeline();
   const [input, setInput] = useState("");
+  const [captureOn, setCaptureOn] = useState(false);
+  const [ocrError, setOcrError] = useState("");
+  const ingestRef = useRef(ingest);
+  ingestRef.current = ingest;
+  const nativeCapture = requireOptionalNativeModule<{
+    startScreenCapture(): Promise<void>;
+    stopScreenCapture(): Promise<void>;
+    recognizeLatestScreen(): Promise<Array<{ text: string; left: number; top: number; right: number; bottom: number }>>;
+  }>("Ps5Translator");
+
+  useEffect(() => {
+    if (!captureOn || !nativeCapture) return;
+    let busy = false;
+    const timer = setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const blocks = await nativeCapture.recognizeLatestScreen();
+        const text = blocks.map((b) => b.text.trim()).filter(Boolean).join("\\n").slice(0, 600);
+        if (text) ingestRef.current(text);
+      } catch (e) {
+        setOcrError(String(e));
+      } finally {
+        busy = false;
+      }
+    }, 1600);
+    return () => clearInterval(timer);
+  }, [captureOn]);
+
   const qc = useQueryClient();
 
   const history = useQuery({ queryKey: ["history"], queryFn: fetchHistory });
@@ -66,6 +96,30 @@ export default function TranslateScreen() {
         {state.payloadStatus === "no_native" ? (
           <Notice kind="warning" text="Gönderilmedi: TV sunucusu yalnızca Android APK'da çalışır (Expo Go / web önizlemede yok)." testID="tv-payload-not-sent" />
         ) : null}
+      </Card>
+
+      <SectionTitle title="Ekranı otomatik oku" subtitle="Android ekran paylaşımı izni gerekir" />
+      <Card>
+        <View style={styles.btnRow}>
+          <Button label="Ekran okumayı başlat" icon="scan-outline"
+            disabled={!nativeCapture || captureOn}
+            onPress={async () => {
+              try {
+                await nativeCapture?.startScreenCapture();
+                setOcrError("");
+                setCaptureOn(true);
+              } catch (e) { setOcrError(String(e)); }
+            }} style={{ flex: 1 }} />
+          <Button label="Durdur" icon="stop-circle-outline" variant="secondary"
+            disabled={!captureOn}
+            onPress={async () => {
+              setCaptureOn(false);
+              await nativeCapture?.stopScreenCapture();
+            }} style={{ flex: 1 }} />
+        </View>
+        <Text style={styles.meta}>{captureOn ? "Ekran OCR taraması etkin" : "Ekran OCR taraması kapalı"}</Text>
+        {!nativeCapture ? <Notice kind="warning" text="Bu özellik için native Android APK gerekir." /> : null}
+        {ocrError ? <Notice kind="error" text={ocrError} /> : null}
       </Card>
 
       <SectionTitle title="Hattı test et" subtitle="Yerel OCR gelene kadar OCR çıktısını buraya elle girin" />
