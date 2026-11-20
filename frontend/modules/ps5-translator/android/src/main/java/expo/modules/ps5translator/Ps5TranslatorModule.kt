@@ -47,6 +47,20 @@ class Ps5TranslatorModule : Module() {
       toBundle(ServerController.core.snapshot())
     }
 
+    AsyncFunction("hasOverlayPermission") {
+      Settings.canDrawOverlays(context)
+    }
+
+    AsyncFunction("requestOverlayPermission") {
+      context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        .setData(Uri.parse("package:${context.packageName}"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    AsyncFunction("showTranslationOverlay") { text: String ->
+      mainHandler.post { TranslationOverlay.show(context, text) }
+    }
+
     AsyncFunction("startScreenCapture") {
       val intent = Intent(context, CapturePermissionActivity::class.java)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
