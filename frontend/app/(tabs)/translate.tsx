@@ -116,6 +116,10 @@ export default function TranslateScreen() {
             disabled={!nativeCapture || captureOn}
             onPress={async () => {
               try {
+                if (!(await nativeCapture?.hasOverlayPermission())) {
+                  setOcrError("Önce ekran üstü gösterim iznini verin.");
+                  return;
+                }
                 await nativeCapture?.startBackgroundTranslation();
                 await nativeCapture?.startScreenCapture();
                 setOcrError("");
