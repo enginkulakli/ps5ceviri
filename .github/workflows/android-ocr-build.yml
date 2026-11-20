@@ -47,10 +47,10 @@ jobs:
           p = Path("app/build.gradle")
           s = p.read_text()
           original = s
-          s, count = re.subn(r"minifyEnabled\\s+[^\\n]+", "minifyEnabled false", s)
+          s, count = re.subn(r"minifyEnabled\s+[^\n]+", "minifyEnabled false", s)
           if count < 1:
               raise SystemExit("Cannot find minifyEnabled in generated app/build.gradle")
-          s = re.sub(r"shrinkResources\\s+[^\\n]+", "shrinkResources false", s)
+          s = re.sub(r"shrinkResources\s+[^\n]+", "shrinkResources false", s)
           p.write_text(s)
           print(f"Disabled R8 in {count} build type(s)")
           PY
