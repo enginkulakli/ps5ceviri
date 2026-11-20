@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.util.Log
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 
@@ -104,7 +105,11 @@ class ScreenCaptureService : Service() {
           // Screen rotation or temporary surface invalidation: next frame may recover.
         } finally { image.close() }
       }, handler)
-    } catch (_: Exception) { stopSelf() }
+    } catch (e: Exception) {
+      Log.e("PS5ScreenCapture", "Unable to start capture", e)
+      ScreenCaptureFrames.lastError = e.message ?: "Capture failed"
+      stopSelf()
+    }
     return START_NOT_STICKY
   }
 
@@ -129,4 +134,5 @@ class ScreenCaptureService : Service() {
 
 internal object ScreenCaptureFrames {
   @Volatile var latest: String? = null
+  @Volatile var lastError: String? = null
 }
