@@ -26,12 +26,13 @@ internal object BackgroundTranslator {
   @Volatile var lastEnglish = ""
   @Volatile var lastTurkish = ""
   @Volatile private var lastProcessed = 0L
+  @Volatile private var lastDetected = 0L
   private var translator: Translator? = null
   private var ready = false
 
   fun start(context: Context) {
     enabled = true
-    status = "downloading_model"
+    status = if (ready) "running" else "downloading_model"
     executor.execute {
       try {
         if (translator == null) {
@@ -78,7 +79,18 @@ internal object BackgroundTranslator {
           .filter { it.length >= 3 && it.any(Char::isLetter) }
           .joinToString("\n")
           .take(600)
-        if (english.isBlank() || english == lastEnglish) return@execute
+        if (english.isBlank()) {
+          if (android.os.SystemClock.elapsedRealtime() - lastDetected > 4000) {
+            lastEnglish = ""
+            lastTurkish = ""
+            Handler(Looper.getMainLooper()).post {
+              runCatching { TranslationOverlay.show(context, "") }
+            }
+          }
+          return@execute
+        }
+        lastDetected = android.os.SystemClock.elapsedRealtime()
+        if (english == lastEnglish) return@execute
         lastEnglish = english
         val turkish = Tasks.await(translator!!.translate(english), 30, TimeUnit.SECONDS)
         if (!enabled) return@execute
