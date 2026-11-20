@@ -54,8 +54,7 @@ class Ps5TranslatorModule : Module() {
     }
 
     AsyncFunction("stopScreenCapture") {
-      context.startService(Intent(context, ScreenCaptureService::class.java)
-        .setAction(ScreenCaptureService.ACTION_STOP))
+      context.stopService(Intent(context, ScreenCaptureService::class.java))
     }
 
     AsyncFunction("recognizeLatestScreen") {
