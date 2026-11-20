@@ -71,6 +71,13 @@ class Ps5TranslatorModule : Module() {
       context.stopService(Intent(context, ScreenCaptureService::class.java))
     }
 
+    AsyncFunction("getScreenCaptureStatus") {
+      Bundle().apply {
+        putBoolean("hasFrame", ScreenCaptureFrames.latest != null)
+        putString("error", ScreenCaptureFrames.lastError)
+      }
+    }
+
     AsyncFunction("recognizeLatestScreen") {
       val frame = ScreenCaptureFrames.latest
       if (frame.isNullOrEmpty()) ArrayList<Bundle>()
