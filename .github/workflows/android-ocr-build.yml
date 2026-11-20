@@ -36,11 +36,13 @@ jobs:
       - name: Generate Android project
         working-directory: frontend
         run: npx expo prebuild --platform android --non-interactive
-      - name: Build debug APK
+      # Debug APK expects Metro on a developer computer and may remain on the splash screen.
+      # Release APK embeds the JavaScript bundle and runs without Metro.
+      - name: Build standalone release APK
         working-directory: frontend/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --stacktrace
+        run: chmod +x gradlew && ./gradlew assembleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5ceviri-ocr-debug-apk
-          path: frontend/android/app/build/outputs/apk/debug/*.apk
+          name: ps5ceviri-ocr-standalone-release-apk
+          path: frontend/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
