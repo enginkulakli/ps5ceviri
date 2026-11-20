@@ -23,7 +23,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # GitHub ubuntu-latest runners already provide the Android SDK.
+      # setup-android@v3 currently requests the removed legacy "tools" package.
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          test -d "${ANDROID_HOME}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --version || "${ANDROID_HOME}/cmdline-tools/16.0/bin/sdkmanager" --version
       - name: Install JS dependencies
         working-directory: frontend
         run: yarn install --frozen-lockfile
