@@ -47,6 +47,12 @@ class Ps5TranslatorModule : Module() {
       toBundle(ServerController.core.snapshot())
     }
 
+    // OCR is local to the device; returns all detected blocks and bounding boxes.
+    // Capture permission and frame acquisition are handled separately.
+    AsyncFunction("recognizeScreenFrame") { base64Frame: String ->
+      ScreenTextRecognizer.recognize(base64Frame)
+    }
+
     AsyncFunction("getLocalIpAddress") {
       NetworkUtils.localIpv4(context)
     }
