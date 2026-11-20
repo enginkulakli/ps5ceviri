@@ -29,6 +29,9 @@ internal object BackgroundTranslator {
   @Volatile private var lastDetected = 0L
   private var translator: Translator? = null
   private var ready = false
+  private val cache = object : LinkedHashMap<String, String>(128, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 150
+  }
 
   fun start(context: Context) {
     enabled = true
@@ -75,28 +78,41 @@ internal object BackgroundTranslator {
     executor.execute {
       try {
         val blocks = ScreenTextRecognizer.recognize(frame)
-        val english = blocks.mapNotNull { it.getString("text")?.trim() }
-          .filter { it.length >= 3 && it.any(Char::isLetter) }
-          .joinToString("\n")
-          .take(600)
-        if (english.isBlank()) {
-          if (android.os.SystemClock.elapsedRealtime() - lastDetected > 4000) {
+        val detected = blocks.mapNotNull { block ->
+          val source = block.getString("text")?.trim()?.replace("\\n", " ") ?: ""
+          if (source.length < 2 || !source.any(Char::isLetter)) null
+          else source to block
+        }.take(24)
+        if (detected.isEmpty()) {
+          if (android.os.SystemClock.elapsedRealtime() - lastDetected > 2500) {
             lastEnglish = ""
             lastTurkish = ""
             Handler(Looper.getMainLooper()).post {
-              runCatching { TranslationOverlay.show(context, "") }
+              runCatching { TranslationOverlay.showBlocks(context, emptyList()) }
             }
           }
           return@execute
         }
         lastDetected = android.os.SystemClock.elapsedRealtime()
-        if (english == lastEnglish) return@execute
-        lastEnglish = english
-        val turkish = Tasks.await(translator!!.translate(english), 30, TimeUnit.SECONDS)
+        val positioned = ArrayList<TranslationOverlay.Block>()
+        for ((source, block) in detected) {
+          if (!enabled) break
+          val translated = cache[source] ?: Tasks.await(
+            translator!!.translate(source), 12, TimeUnit.SECONDS
+          ).also { cache[source] = it }
+          if (translated.isBlank()) continue
+          positioned.add(TranslationOverlay.Block(
+            translated,
+            block.getInt("left"), block.getInt("top"),
+            block.getInt("right"), block.getInt("bottom"),
+            block.getInt("frameWidth"), block.getInt("frameHeight")
+          ))
+        }
         if (!enabled) return@execute
-        lastTurkish = turkish
+        lastEnglish = detected.joinToString("\\n") { it.first }.take(600)
+        lastTurkish = positioned.joinToString("\\n") { it.text }.take(600)
         Handler(Looper.getMainLooper()).post {
-          runCatching { TranslationOverlay.show(context, turkish) }
+          runCatching { TranslationOverlay.showBlocks(context, positioned) }
             .onFailure { status = "overlay_error: ${it.message}" }
         }
       } catch (e: Exception) {
