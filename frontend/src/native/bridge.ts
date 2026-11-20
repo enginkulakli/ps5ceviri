@@ -46,6 +46,9 @@ export interface Ps5TranslatorNativeModule {
   requestOverlayPermission(): Promise<void>;
   showTranslationOverlay(text: string): Promise<void>;
   startScreenCapture(): Promise<void>;
+  startBackgroundTranslation(): Promise<void>;
+  stopBackgroundTranslation(): Promise<void>;
+  getBackgroundTranslationStatus(): Promise<{enabled: boolean; status: string; english: string; turkish: string}>;
   stopScreenCapture(): Promise<void>;
   recognizeLatestScreen(): Promise<Array<{text: string; left: number; top: number; right: number; bottom: number}>>;
   // ---- later phases (not implemented natively yet) ----
