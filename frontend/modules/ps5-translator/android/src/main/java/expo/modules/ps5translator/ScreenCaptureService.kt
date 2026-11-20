@@ -46,7 +46,7 @@ class ScreenCaptureService : Service() {
     val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
     val data = if (Build.VERSION.SDK_INT >= 33)
       intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-    else @Suppress("DEPRECATION") intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+    else intent?.getParcelableExtra(EXTRA_RESULT_DATA)
     if (resultCode != android.app.Activity.RESULT_OK || data == null) {
       stopSelf()
       return START_NOT_STICKY
