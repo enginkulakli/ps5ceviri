@@ -47,6 +47,23 @@ class Ps5TranslatorModule : Module() {
       toBundle(ServerController.core.snapshot())
     }
 
+    AsyncFunction("startScreenCapture") {
+      val intent = Intent(context, CapturePermissionActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+    }
+
+    AsyncFunction("stopScreenCapture") {
+      context.startService(Intent(context, ScreenCaptureService::class.java)
+        .setAction(ScreenCaptureService.ACTION_STOP))
+    }
+
+    AsyncFunction("recognizeLatestScreen") {
+      val frame = ScreenCaptureFrames.latest
+      if (frame.isNullOrEmpty()) ArrayList<Bundle>()
+      else ScreenTextRecognizer.recognize(frame)
+    }
+
     // OCR is local to the device; returns all detected blocks and bounding boxes.
     // Capture permission and frame acquisition are handled separately.
     AsyncFunction("recognizeScreenFrame") { base64Frame: String ->
