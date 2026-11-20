@@ -43,7 +43,7 @@ export default function TranslateScreen() {
       busy = true;
       try {
         const blocks = await nativeCapture.recognizeLatestScreen();
-        const text = blocks.map((b) => b.text.trim()).filter(Boolean).join("\\n").slice(0, 600);
+        const text = blocks.map((b) => b.text.trim()).filter(Boolean).join("\n").slice(0, 600);
         if (text) ingestRef.current(text);
       } catch (e) {
         setOcrError(String(e));
