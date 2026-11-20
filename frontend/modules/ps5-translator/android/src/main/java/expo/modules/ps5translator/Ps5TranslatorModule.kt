@@ -71,6 +71,23 @@ class Ps5TranslatorModule : Module() {
       context.stopService(Intent(context, ScreenCaptureService::class.java))
     }
 
+    AsyncFunction("startBackgroundTranslation") {
+      BackgroundTranslator.start(context.applicationContext)
+    }
+
+    AsyncFunction("stopBackgroundTranslation") {
+      BackgroundTranslator.stop(context.applicationContext)
+    }
+
+    AsyncFunction("getBackgroundTranslationStatus") {
+      Bundle().apply {
+        putBoolean("enabled", BackgroundTranslator.enabled)
+        putString("status", BackgroundTranslator.status)
+        putString("english", BackgroundTranslator.lastEnglish)
+        putString("turkish", BackgroundTranslator.lastTurkish)
+      }
+    }
+
     AsyncFunction("getScreenCaptureStatus") {
       Bundle().apply {
         putBoolean("hasFrame", ScreenCaptureFrames.latest != null)
