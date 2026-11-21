@@ -1,6 +1,7 @@
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { requireOptionalNativeModule } from "expo";
 import { ActivityIndicator, RefreshControl, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +23,31 @@ export default function TranslateScreen() {
   const wide = width >= 900;
   const { state, ingest, clear } = usePipeline();
   const [input, setInput] = useState("");
+  const [captureOn, setCaptureOn] = useState(false);
+  const [ocrError, setOcrError] = useState("");
+  const [backgroundStatus, setBackgroundStatus] = useState("idle");
+  const nativeCapture = requireOptionalNativeModule<{
+    hasOverlayPermission(): Promise<boolean>;
+    requestOverlayPermission(): Promise<void>;
+    startScreenCapture(): Promise<void>;
+    startBackgroundTranslation(): Promise<void>;
+    stopBackgroundTranslation(): Promise<void>;
+    getBackgroundTranslationStatus(): Promise<{status: string; enabled: boolean; english: string; turkish: string}>;
+    stopScreenCapture(): Promise<void>;
+    recognizeLatestScreen(): Promise<Array<{ text: string; left: number; top: number; right: number; bottom: number }>>;
+  }>("Ps5Translator");
+
+  useEffect(() => {
+    if (!captureOn || !nativeCapture) return;
+    const timer = setInterval(async () => {
+      try {
+        const result = await nativeCapture.getBackgroundTranslationStatus();
+        setBackgroundStatus(result.status);
+      } catch (e) { setOcrError(String(e)); }
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [captureOn]);
+
   const qc = useQueryClient();
 
   const history = useQuery({ queryKey: ["history"], queryFn: fetchHistory });
@@ -66,6 +92,41 @@ export default function TranslateScreen() {
         {state.payloadStatus === "no_native" ? (
           <Notice kind="warning" text="Gönderilmedi: TV sunucusu yalnızca Android APK'da çalışır (Expo Go / web önizlemede yok)." testID="tv-payload-not-sent" />
         ) : null}
+      </Card>
+
+      <SectionTitle title="Ekranı otomatik oku" subtitle="Android ekran paylaşımı izni gerekir" />
+      <Card>
+        <Button label="Ekran üstü gösterim izni ver" icon="layers-outline"
+          disabled={!nativeCapture}
+          onPress={async () => {
+            if (!(await nativeCapture?.hasOverlayPermission())) await nativeCapture?.requestOverlayPermission();
+          }} />
+        <View style={styles.btnRow}>
+          <Button label="Ekran okumayı başlat" icon="scan-outline"
+            disabled={!nativeCapture || captureOn}
+            onPress={async () => {
+              try {
+                if (!(await nativeCapture?.hasOverlayPermission())) {
+                  setOcrError("Önce ekran üstü gösterim iznini verin.");
+                  return;
+                }
+                await nativeCapture?.startBackgroundTranslation();
+                await nativeCapture?.startScreenCapture();
+                setOcrError("");
+                setCaptureOn(true);
+              } catch (e) { setOcrError(String(e)); }
+            }} style={{ flex: 1 }} />
+          <Button label="Durdur" icon="stop-circle-outline" variant="secondary"
+            disabled={!captureOn}
+            onPress={async () => {
+              setCaptureOn(false);
+              await nativeCapture?.stopBackgroundTranslation();
+              await nativeCapture?.stopScreenCapture();
+            }} style={{ flex: 1 }} />
+        </View>
+        <Text style={styles.meta}>{captureOn ? `Arka plan çevirisi: ${backgroundStatus}` : "Ekran OCR taraması kapalı"}</Text>
+        {!nativeCapture ? <Notice kind="warning" text="Bu özellik için native Android APK gerekir." /> : null}
+        {ocrError ? <Notice kind="error" text={ocrError} /> : null}
       </Card>
 
       <SectionTitle title="Hattı test et" subtitle="Yerel OCR gelene kadar OCR çıktısını buraya elle girin" />

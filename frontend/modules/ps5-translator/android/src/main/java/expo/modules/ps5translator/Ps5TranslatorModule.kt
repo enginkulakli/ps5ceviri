@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -45,6 +49,123 @@ class Ps5TranslatorModule : Module() {
       ServerController.localIp = NetworkUtils.localIpv4(context)
       ServerController.wifiConnected = NetworkUtils.isOnWifi(context)
       toBundle(ServerController.core.snapshot())
+    }
+
+    AsyncFunction("hasOverlayPermission") {
+      Settings.canDrawOverlays(context)
+    }
+
+    AsyncFunction("requestOverlayPermission") {
+      context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        .setData(Uri.parse("package:${context.packageName}"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    AsyncFunction("showTranslationOverlay") { text: String ->
+      mainHandler.post { TranslationOverlay.show(context, text) }
+    }
+
+    AsyncFunction("startScreenCapture") {
+      val intent = Intent(context, CapturePermissionActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+    }
+
+    AsyncFunction("stopScreenCapture") {
+      context.stopService(Intent(context, ScreenCaptureService::class.java))
+    }
+
+    AsyncFunction("startBackgroundTranslation") {
+      BackgroundTranslator.start(context.applicationContext)
+    }
+
+    AsyncFunction("stopBackgroundTranslation") {
+      BackgroundTranslator.stop(context.applicationContext)
+    }
+
+    AsyncFunction("getBackgroundTranslationStatus") {
+      Bundle().apply {
+        putBoolean("enabled", BackgroundTranslator.enabled)
+        putString("status", BackgroundTranslator.status)
+        putString("english", BackgroundTranslator.lastEnglish)
+        putString("turkish", BackgroundTranslator.lastTurkish)
+      }
+    }
+
+    AsyncFunction("getScreenCaptureStatus") {
+      Bundle().apply {
+        putBoolean("hasFrame", ScreenCaptureFrames.latest != null)
+        putString("error", ScreenCaptureFrames.lastError)
+      }
+    }
+
+    AsyncFunction("recognizeLatestScreen") {
+      val frame = ScreenCaptureFrames.latest
+      if (frame.isNullOrEmpty()) ArrayList<Bundle>()
+      else ScreenTextRecognizer.recognize(frame)
+    }
+
+    // OCR is local to the device; returns all detected blocks and bounding boxes.
+    // Capture permission and frame acquisition are handled separately.
+    AsyncFunction("recognizeScreenFrame") { base64Frame: String ->
+      ScreenTextRecognizer.recognize(base64Frame)
+    }
+
+    // Real LAN discovery (PS4/PS5 Remote Play discovery protocol, UDP 9302).
+    // Discovery only: pairing and video streaming require a separate native Chiaki engine.
+    AsyncFunction("discoverConsoles") { timeoutMs: Int ->
+      val found = ArrayList<Bundle>()
+      val seen = HashSet<String>()
+      val deadline = System.currentTimeMillis() + timeoutMs.coerceIn(500, 8000)
+      val request = "SRCH * HTTP/1.1\r\ndevice-discovery-protocol-version:00030010\r\n\r\n"
+        .toByteArray(Charsets.UTF_8)
+      DatagramSocket().use { socket ->
+        socket.broadcast = true
+        socket.soTimeout = 350
+        val destinations = listOf("255.255.255.255")
+        for (destination in destinations) {
+          socket.send(DatagramPacket(request, request.size, InetAddress.getByName(destination), 9302))
+        }
+        val bytes = ByteArray(4096)
+        while (System.currentTimeMillis() < deadline) {
+          val packet = DatagramPacket(bytes, bytes.size)
+          try {
+            socket.receive(packet)
+            val message = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
+            if (!message.contains("host-id:", ignoreCase = true) &&
+                !message.contains("host-type:", ignoreCase = true)) continue
+            val host = packet.address.hostAddress ?: continue
+            if (!seen.add(host)) continue
+            fun header(name: String): String? = message.lineSequence().firstOrNull {
+              it.startsWith("$name:", ignoreCase = true)
+            }?.substringAfter(':')?.trim()
+            val state = if (header("host-request-port") == null ||
+              header("status")?.contains("standby", ignoreCase = true) == true) "standby" else "ready"
+            found.add(Bundle().apply {
+              putString("name", header("host-name") ?: "PlayStation")
+              putString("host", host)
+              putString("state", state)
+            })
+          } catch (_: SocketTimeoutException) { /* wait until timeout */ }
+        }
+      }
+      found
+    }
+
+    // Temporary real-video path: open a separately installed Chiaki client.
+    // The user pairs the PS5 in Chiaki. MediaProjection then captures its screen.
+    // This is NOT an embedded Remote Play session or a headless stream.
+    AsyncFunction("openExternalRemotePlay") {
+      val packages = listOf("com.streetpea.chiaki4deck", "com.metallic.chiaki", "com.chiaki")
+      val pm = context.packageManager
+      val launch = packages.firstNotNullOfOrNull { packageName ->
+        pm.getLaunchIntentForPackage(packageName)
+      } ?: throw IllegalStateException(
+        "Chiaki Android uygulaması bulunamadı. Önce uyumlu Chiaki istemcisini kurup PS5 eşleştirmesini orada yapın."
+      )
+      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(launch)
+      true
     }
 
     AsyncFunction("getLocalIpAddress") {
