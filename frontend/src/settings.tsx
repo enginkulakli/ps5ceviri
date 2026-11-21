@@ -27,7 +27,7 @@ export type Settings = {
 export const DEFAULT_SETTINGS: Settings = {
   sourceLang: "en",
   targetLang: "tr",
-  engine: "online",
+  engine: "offline",
   translateQuality: "best",
   ocrRegion: { x: 0, y: 0.72, w: 1, h: 0.28 },
   ocrIntervalMs: 300,
