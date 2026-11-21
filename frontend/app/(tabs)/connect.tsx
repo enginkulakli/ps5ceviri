@@ -101,16 +101,21 @@ export default function ConnectScreen() {
 
   const ps5 = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="PS5 bağlantısı" subtitle="chiaki-ng motoru · sonraki aşama" />
+      <SectionTitle title="PS5 bağlantısı" subtitle="Yerel ağda gerçek PS5 keşfi · Remote Play motoru hazırlık aşamasında" />
       <Card testID="ps5-section">
         <View style={styles.rowBetween}>
           <Text style={styles.label}>Remote Play motoru</Text>
-          <StatusBadge kind="native" label="Henüz uygulanmadı (sonraki aşama)" testID="ps5-engine-badge" />
+          <StatusBadge kind="native" label="Keşif var · video motoru bekleniyor" testID="ps5-engine-badge" />
         </View>
         <Button testID="discover-consoles-button" label="Ağda konsol bul" icon="search-outline" variant="secondary" loading={busy === "discover"}
           onPress={() => needNative("discover", setPsMsg, async () => {
             const list = await nativeModule!.discoverConsoles!(3000);
-            return list.length ? `${list.length} konsol bulundu: ${list.map((c) => `${c.name} (${c.host})`).join(", ")}` : "Konsol bulunamadı. PS5 açık ve aynı ağda mı?";
+            if (list.length) {
+              const known = new Set(settings.consoles.map((c) => c.host));
+              const added = list.filter((c) => !known.has(c.host)).map((c, i) => ({ id: `${Date.now()}-${i}`, name: c.name, host: c.host, registered: false }));
+              if (added.length) update({ consoles: [...settings.consoles, ...added] });
+            }
+            return list.length ? `${list.length} konsol bulundu ve listeye eklendi: ${list.map((c) => `${c.name} (${c.host})`).join(", ")}` : "Konsol bulunamadı. PS5 açık, Remote Play etkin ve tablet aynı Wi-Fi ağında mı?";
           }, "discoverConsoles")}
         />
         <View style={styles.divider} />
