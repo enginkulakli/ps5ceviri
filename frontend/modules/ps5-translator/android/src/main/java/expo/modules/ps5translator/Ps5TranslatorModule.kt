@@ -152,6 +152,22 @@ class Ps5TranslatorModule : Module() {
       found
     }
 
+    // Temporary real-video path: open a separately installed Chiaki client.
+    // The user pairs the PS5 in Chiaki. MediaProjection then captures its screen.
+    // This is NOT an embedded Remote Play session or a headless stream.
+    AsyncFunction("openExternalRemotePlay") {
+      val packages = listOf("com.streetpea.chiaki4deck", "com.metallic.chiaki", "com.chiaki")
+      val pm = context.packageManager
+      val launch = packages.firstNotNullOfOrNull { packageName ->
+        pm.getLaunchIntentForPackage(packageName)
+      } ?: throw IllegalStateException(
+        "Chiaki Android uygulaması bulunamadı. Önce uyumlu Chiaki istemcisini kurup PS5 eşleştirmesini orada yapın."
+      )
+      launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(launch)
+      true
+    }
+
     AsyncFunction("getLocalIpAddress") {
       NetworkUtils.localIpv4(context)
     }
