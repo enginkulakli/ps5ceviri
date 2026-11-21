@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -105,6 +109,47 @@ class Ps5TranslatorModule : Module() {
     // Capture permission and frame acquisition are handled separately.
     AsyncFunction("recognizeScreenFrame") { base64Frame: String ->
       ScreenTextRecognizer.recognize(base64Frame)
+    }
+
+    // Real LAN discovery (PS4/PS5 Remote Play discovery protocol, UDP 9302).
+    // Discovery only: pairing and video streaming require a separate native Chiaki engine.
+    AsyncFunction("discoverConsoles") { timeoutMs: Int ->
+      val found = ArrayList<Bundle>()
+      val seen = HashSet<String>()
+      val deadline = System.currentTimeMillis() + timeoutMs.coerceIn(500, 8000)
+      val request = "SRCH * HTTP/1.1\\r\\ndevice-discovery-protocol-version:00030010\\r\\n\\r\\n"
+        .toByteArray(Charsets.UTF_8)
+      DatagramSocket().use { socket ->
+        socket.broadcast = true
+        socket.soTimeout = 350
+        val destinations = listOf("255.255.255.255")
+        for (destination in destinations) {
+          socket.send(DatagramPacket(request, request.size, InetAddress.getByName(destination), 9302))
+        }
+        val bytes = ByteArray(4096)
+        while (System.currentTimeMillis() < deadline) {
+          val packet = DatagramPacket(bytes, bytes.size)
+          try {
+            socket.receive(packet)
+            val message = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
+            if (!message.contains("host-id:", ignoreCase = true) &&
+                !message.contains("host-type:", ignoreCase = true)) continue
+            val host = packet.address.hostAddress ?: continue
+            if (!seen.add(host)) continue
+            fun header(name: String): String? = message.lineSequence().firstOrNull {
+              it.startsWith("$name:", ignoreCase = true)
+            }?.substringAfter(':')?.trim()
+            val state = if (header("host-request-port") == null ||
+              header("status")?.contains("standby", ignoreCase = true) == true) "standby" else "ready"
+            found.add(Bundle().apply {
+              putString("name", header("host-name") ?: "PlayStation")
+              putString("host", host)
+              putString("state", state)
+            })
+          } catch (_: SocketTimeoutException) { /* wait until timeout */ }
+        }
+      }
+      found
     }
 
     AsyncFunction("getLocalIpAddress") {
