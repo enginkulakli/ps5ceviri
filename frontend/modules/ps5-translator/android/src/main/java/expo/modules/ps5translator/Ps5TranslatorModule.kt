@@ -117,7 +117,7 @@ class Ps5TranslatorModule : Module() {
       val found = ArrayList<Bundle>()
       val seen = HashSet<String>()
       val deadline = System.currentTimeMillis() + timeoutMs.coerceIn(500, 8000)
-      val request = "SRCH * HTTP/1.1\\r\\ndevice-discovery-protocol-version:00030010\\r\\n\\r\\n"
+      val request = "SRCH * HTTP/1.1\r\ndevice-discovery-protocol-version:00030010\r\n\r\n"
         .toByteArray(Charsets.UTF_8)
       DatagramSocket().use { socket ->
         socket.broadcast = true
