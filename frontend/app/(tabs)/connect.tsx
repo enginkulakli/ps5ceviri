@@ -107,6 +107,13 @@ export default function ConnectScreen() {
           <Text style={styles.label}>Remote Play motoru</Text>
           <StatusBadge kind="native" label="Keşif var · video motoru bekleniyor" testID="ps5-engine-badge" />
         </View>
+        <Button testID="open-chiaki-button" label="Chiaki ile Remote Play aç (geçici)" icon="open-outline" variant="secondary" loading={busy === "chiaki"}
+          onPress={() => needNative("chiaki", setPsMsg, async () => {
+            await nativeModule!.openExternalRemotePlay();
+            return "Chiaki açıldı. PS5 eşleştirmesini Chiaki içinde yapın; ardından ekran yakalama izni verip çeviriyi başlatın.";
+          }, "openExternalRemotePlay")}
+        />
+        <Notice kind="info" text="Geçici yöntem: Chiaki ayrı uygulamada açılır. Gömülü, arka planda çalışan Remote Play motoru henüz yoktur." />
         <Button testID="discover-consoles-button" label="Ağda konsol bul" icon="search-outline" variant="secondary" loading={busy === "discover"}
           onPress={() => needNative("discover", setPsMsg, async () => {
             const list = await nativeModule!.discoverConsoles!(3000);
