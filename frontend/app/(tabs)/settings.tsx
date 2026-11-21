@@ -60,9 +60,9 @@ export default function SettingsScreen() {
         <Pressable testID="engine-online-option" onPress={() => update({ engine: "online" })} style={[styles.option, s.engine === "online" && styles.optionOn]}>
           <Ionicons name={s.engine === "online" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={styles.optTitle}>Çevrimiçi yapay zekâ (yüksek kalite)</Text>
-            <Text style={styles.meta}>İnternet gerekir. Altyazı metni çeviri sunucusuna gönderilir. Kullanım başına kredi harcar.</Text>
-            <StatusBadge kind="ready" />
+            <Text style={styles.optTitle}>Yapay zekâ çevirisi (isteğe bağlı, deneysel)</Text>
+            <Text style={styles.meta}>İnternet ve API kredisi gerekir. Bu seçenek henüz arka plan ekran çevirisine bağlı değildir; API yapılandırılmadan ücretli istek yapılmaz.</Text>
+            <StatusBadge kind="idle" label="Deneysel" />
           </View>
         </Pressable>
         {s.engine === "online" ? (
