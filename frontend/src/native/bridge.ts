@@ -51,7 +51,7 @@ export interface Ps5TranslatorNativeModule {
   getBackgroundTranslationStatus(): Promise<{enabled: boolean; status: string; english: string; turkish: string}>;
   stopScreenCapture(): Promise<void>;
   recognizeLatestScreen(): Promise<Array<{text: string; left: number; top: number; right: number; bottom: number}>>;
-  // ---- later phases (not implemented natively yet) ----
+  openExternalRemotePlay(): Promise<boolean>; // launches an installed Chiaki client; no embedded stream\n  // ---- later phases (not implemented natively yet) ----
   discoverConsoles?(timeoutMs: number): Promise<DiscoveredConsole[]>;
   registerConsole?(host: string, psnAccountIdBase64: string, pin: string): Promise<{ registKey: string; morning: string }>;
   startSession?(host: string): Promise<void>;
