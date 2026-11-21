@@ -13,7 +13,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <application>
+    <queries>\n        <package android:name="com.streetpea.chiaki4deck" />\n        <package android:name="com.metallic.chiaki" />\n        <package android:name="com.chiaki" />\n    </queries>\n    <application>
         <activity android:name="expo.modules.ps5translator.CapturePermissionActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service android:name="expo.modules.ps5translator.ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <service
