@@ -173,6 +173,33 @@ async def main():
     ws = await websockets.connect(URL, proxy=None)
     check("expired subtitles are not replayed", await no_msg(ws))
 
+    # Overlay protocol is negotiated independently of the existing text stream.
+    legacy = await websockets.connect(f"ws://127.0.0.1:{PORT}", proxy=None)
+    await legacy.send('{"type":"hello","subtitleVersion":2}')
+    await ws.send('{"type":"hello","subtitleVersion":3}')
+    await asyncio.sleep(0.12)
+    check("only the v3 TV receives the overlay", h.cmd("OVERLAY") == "1" and await no_msg(legacy, 0.1))
+    overlay = json.loads(await recv(ws))
+    check("separate spatial boxes retain bounds, text and expiry", overlay["type"] == "overlay"
+          and (overlay["frameWidth"], overlay["frameHeight"]) == (1280, 720)
+          and [(x["id"], x["ttlMs"], x["y"]) for x in overlay["blocks"]] == [("1", 1000, 0.2), ("2", 2500, 0.7)]
+          and overlay["blocks"][0]["text"] == 'Görev "başladı"', str(overlay))
+    await asyncio.sleep(1.05)
+    await ws.close()
+    ws = await websockets.connect(URL, proxy=None)
+    check("overlay waits for negotiation on reconnect", await no_msg(ws, 0.1))
+    await ws.send('{"type":"hello","subtitleVersion":3}')
+    replay = json.loads(await recv(ws))
+    check("overlay replay excludes expired boxes", len(replay["blocks"]) == 1 and replay["blocks"][0]["id"] == "2"
+          and 0 < replay["blocks"][0]["ttlMs"] < 2500, str(replay))
+    check("clear overlay is an empty snapshot", h.cmd("CLEAROVERLAY") == "1" and json.loads(await recv(ws))["blocks"] == [])
+    h.cmd("TTL 2000 Altyazı geri döndü")
+    check("legacy subtitle continues after overlay", json.loads(await recv(ws))["text"] == "Altyazı geri döndü"
+          and json.loads(await recv(legacy))["text"] == "Altyazı geri döndü")
+    check("v3 TVs still receive subtitle refresh", h.cmd("REFRESH 2000 Altyazı geri döndü") == "true"
+          and json.loads(await recv(ws))["type"] == "refresh" and json.loads(await recv(legacy))["type"] == "refresh")
+    await legacy.close()
+
     # stability: 90 s, 1 msg / 50 ms with an idle client relying on ping/pong
     t0 = time.time()
     n = 0
