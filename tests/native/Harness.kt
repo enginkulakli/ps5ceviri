@@ -32,6 +32,8 @@ fun main() {
   check(originals.size == 2 && originals.map { it.id }.distinct().size == 2)
   overlays.observe(listOf(DetectedText("Castle", moved)), 500, 1000)
   val moving = overlays.alive(550, 1000).first()
+  check(overlays.seenInLatestFrame(moving))
+  check(!overlays.seenInLatestFrame(overlays.alive(550, 1000).last()))
   check(moving.id == originals.first().id && moving.rect.x in .11.. .13)
   check(overlays.alive(1100, 1000).size == 1)
   overlays.observe(listOf(DetectedText("Menu", moved)), 1200, 1000)

@@ -154,7 +154,7 @@ internal class RemoteSubtitlePipeline(
         (line.confidence > 0 && line.confidence < minConfidence) ||
         bounds.height() < maxOf(7, height / 30)) return@filter false
       val x = bounds.exactCenterX() / width
-      if (x < .17 && bounds.right < width * .24 || x > .83 && bounds.left > width * .76) return@filter false
+      if ((x < .17 && bounds.right < width * .24) || (x > .83 && bounds.left > width * .76)) return@filter false
       !hud.isStatic(text, x, bounds.exactCenterY() / height, now)
     }
     val anchor = lines.minByOrNull { line ->
@@ -175,9 +175,12 @@ internal class RemoteSubtitlePipeline(
     val now = SystemClock.elapsedRealtime()
     if (fullScreen) {
       val active = overlay.alive(now, screenTtl)
-      requestTranslations(active.map { it.text }, now)
+      requestTranslations(active.filter(overlay::seenInLatestFrame).map { it.text }, now)
       val boxes = active.mapNotNull { item ->
-        cache[item.text]?.let { OverlayBox(item.id, it, item.rect, item.seenAt + screenTtl - now) }
+        val text = cache[item.text] ?: return@mapNotNull null
+        val wasVisible = previousOverlay.any { it.id == item.id && it.text == text }
+        if (!wasVisible && !overlay.seenInLatestFrame(item)) return@mapNotNull null
+        OverlayBox(item.id, text, item.rect, item.seenAt + screenTtl - now)
       }
       val changed = boxes.size != previousOverlay.size || boxes.zip(previousOverlay).any { (a, b) ->
         a.id != b.id || a.text != b.text || a.rect != b.rect
@@ -253,6 +256,7 @@ internal class RemoteSubtitlePipeline(
 
   fun resetStream() {
     scanEpoch++
+    lastScanAt = 0L
     handler.removeCallbacks(tick)
     tracker = SubtitleTracker(options.intervalMs, options.confirmations)
     overlay.clear()

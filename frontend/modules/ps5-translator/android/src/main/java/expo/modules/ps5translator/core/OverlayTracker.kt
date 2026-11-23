@@ -5,10 +5,12 @@ internal data class DetectedText(val text: String, val rect: FrameRect)
 internal class OverlayTracker {
   internal data class Item(val id: Long, val text: String, val rect: FrameRect, val seenAt: Long)
   private var nextId = 0L
+  private var latestObservation = 0L
   private val items = LinkedHashMap<Long, Item>()
 
   fun observe(blocks: List<DetectedText>, now: Long, ttl: Long) {
     alive(now, ttl)
+    latestObservation = now
     val candidates = items.values.toMutableList()
     for (block in blocks.take(24)) {
       val exact = candidates.filter { similarOcr(it.text, block.text) && it.rect.distance(block.rect) < .19 }
@@ -30,6 +32,8 @@ internal class OverlayTracker {
     items.values.removeAll { now - it.seenAt >= ttl }
     return items.values.toList()
   }
+
+  fun seenInLatestFrame(item: Item) = item.seenAt == latestObservation
 
   fun clear() = items.clear()
 }
