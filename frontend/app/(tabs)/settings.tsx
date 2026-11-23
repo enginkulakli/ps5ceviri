@@ -61,7 +61,7 @@ export default function SettingsScreen() {
           <Ionicons name={s.engine === "online" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={styles.optTitle}>Yapay zekâ çevirisi (isteğe bağlı, deneysel)</Text>
-            <Text style={styles.meta}>İnternet ve API kredisi gerekir. Bu seçenek henüz arka plan ekran çevirisine bağlı değildir; API yapılandırılmadan ücretli istek yapılmaz.</Text>
+            <Text style={styles.meta}>Manuel çeviri testi için kullanılır. İnternet ve yapılandırılmış API gerekir.</Text>
             <StatusBadge kind="idle" label="Deneysel" />
           </View>
         </Pressable>
@@ -78,8 +78,8 @@ export default function SettingsScreen() {
           <Ionicons name={s.engine === "offline" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={styles.optTitle}>Cihaz içi çevrimdışı (ML Kit, ücretsiz)</Text>
-            <Text style={styles.meta}>İnternet gerekmez, veri cihazdan çıkmaz. Kalite orta. ~30 MB model bir kez indirilir.</Text>
-            <StatusBadge kind={hasNative("translateOffline") ? "ready" : "native"} label={hasNative("translateOffline") ? undefined : "Henüz uygulanmadı"} />
+            <Text style={styles.meta}>PS5 çevirisi bu motorla çalışır. İlk kullanımda dil modeli indirilir, ardından yerel ağ yeterlidir.</Text>
+            <StatusBadge kind={hasNative("translateOffline") ? "ready" : "native"} label={hasNative("translateOffline") ? "Android" : "Android APK gerekir"} />
           </View>
         </Pressable>
         <Field
@@ -97,7 +97,7 @@ export default function SettingsScreen() {
 
   const right = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="OCR ve altyazı algılama" />
+      <SectionTitle title="OCR ve altyazı algılama" subtitle="Değişiklikler sonraki Remote Play oturumunda uygulanır" />
       <Card>
         <Pressable testID="open-ocr-region-button" onPress={() => router.push("/ocr-region")}>
           <RegionPreview region={s.ocrRegion} />
@@ -106,13 +106,13 @@ export default function SettingsScreen() {
           </Text>
         </Pressable>
         <Stepper testID="ocr-interval" label="OCR kontrol sıklığı" display={`${s.ocrIntervalMs} ms`}
-          onDec={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs - 50, 100, 2000) })} onInc={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs + 50, 100, 2000) })} />
+          onDec={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs - 50, 150, 2000) })} onInc={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs + 50, 150, 2000) })} />
         <Stepper testID="ocr-sensitivity" label="Algılama hassasiyeti" display={`%${Math.round(s.sensitivity * 100)}`}
           onDec={() => update({ sensitivity: clamp(Math.round((s.sensitivity - 0.1) * 10) / 10, 0, 1) })} onInc={() => update({ sensitivity: clamp(Math.round((s.sensitivity + 0.1) * 10) / 10, 0, 1) })} />
-        <Stepper testID="repeat-window" label="Aynı metni tekrar gönderme" display={`${(s.repeatWindowMs / 1000).toFixed(1)} sn`}
+        <Stepper testID="repeat-window" label="Manuel testte tekrar engelleme" display={`${(s.repeatWindowMs / 1000).toFixed(1)} sn`}
           onDec={() => update({ repeatWindowMs: clamp(s.repeatWindowMs - 500, 500, 30000) })} onInc={() => update({ repeatWindowMs: clamp(s.repeatWindowMs + 500, 500, 30000) })} />
         <Stepper testID="clear-delay" label="Altyazı temizleme gecikmesi" display={`${(s.clearDelayMs / 1000).toFixed(1)} sn`}
-          onDec={() => update({ clearDelayMs: clamp(s.clearDelayMs - 200, 0, 10000) })} onInc={() => update({ clearDelayMs: clamp(s.clearDelayMs + 200, 0, 10000) })} />
+          onDec={() => update({ clearDelayMs: clamp(s.clearDelayMs - 200, 500, 10000) })} onInc={() => update({ clearDelayMs: clamp(s.clearDelayMs + 200, 500, 10000) })} />
       </Card>
 
       <SectionTitle title="Bağlantı ve arka plan" />

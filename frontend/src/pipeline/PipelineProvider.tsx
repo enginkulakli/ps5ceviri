@@ -84,7 +84,7 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
         let latency = 0;
         let cached = false;
         if (s.engine === "offline") {
-          if (!nativeModule?.translateOffline || !hasNative("translateOffline")) throw new Error("Çevrimdışı çeviri (ML Kit) henüz uygulanmadı. Ayarlardan çevrimiçi motoru seçin.");
+          if (!nativeModule?.translateOffline || !hasNative("translateOffline")) throw new Error("Çevrimdışı çeviri için Android APK gerekir.");
           const t0 = Date.now();
           translated = await nativeModule.translateOffline(text, s.sourceLang, s.targetLang);
           latency = Date.now() - t0;

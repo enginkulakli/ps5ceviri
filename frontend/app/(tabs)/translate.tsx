@@ -11,6 +11,7 @@ import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
+import { useRemotePlay } from "@/src/native/RemotePlayProvider";
 import { usePipeline } from "@/src/pipeline/PipelineProvider";
 import { makeStyles, useTheme } from "@/src/theme";
 
@@ -22,6 +23,7 @@ export default function TranslateScreen() {
   const { width } = useWindowDimensions();
   const wide = width >= 900;
   const { state, ingest, clear } = usePipeline();
+  const { status: live } = useRemotePlay();
   const [input, setInput] = useState("");
   const [captureOn, setCaptureOn] = useState(false);
   const [ocrError, setOcrError] = useState("");
@@ -65,22 +67,22 @@ export default function TranslateScreen() {
           <StatusBadge kind={badge} testID="engine-state-badge" />
         </View>
         <Text testID="detected-english-text" style={styles.en}>
-          {state.english || "Henüz metin yok"}
+          {(live?.active ? live.english : state.english) || "Henüz metin yok"}
         </Text>
         <View style={styles.divider} />
         <Text style={styles.label}>Türkçe çeviri</Text>
         <Text testID="turkish-translation-text" style={styles.tr}>
-          {state.engineState === "translating" && !state.turkish ? "Çevriliyor…" : state.turkish || "—"}
+          {live?.active ? live.turkish || "—" : state.engineState === "translating" && !state.turkish ? "Çevriliyor…" : state.turkish || "—"}
         </Text>
         {state.error ? <Notice kind="error" text={state.error} testID="translation-error" /> : null}
         <Text testID="pipeline-last-event" style={styles.meta}>
           {state.lastEvent}
           {state.lastLatencyMs != null ? ` · ${state.lastLatencyMs} ms${state.lastCached ? " (önbellek)" : ""}` : ""}
         </Text>
-        <Button testID="clear-translation-button" label="Çeviriyi temizle" icon="close-circle-outline" variant="secondary" onPress={clear} />
+        <Button testID="clear-translation-button" label="Çeviriyi temizle" icon="close-circle-outline" variant="secondary" onPress={clear} disabled={live?.active} />
       </Card>
 
-      <SectionTitle title="TV'ye giden mesaj" subtitle="Mevcut Tizen formatı, değiştirilmedi" />
+      <SectionTitle title="Manuel test mesajı" />
       <Card testID="tv-payload-card">
         <Text testID="tv-payload-text" style={styles.mono}>
           {state.lastPayload ?? '{"text":""}'}
@@ -94,7 +96,7 @@ export default function TranslateScreen() {
         ) : null}
       </Card>
 
-      <SectionTitle title="Ekranı otomatik oku" subtitle="Android ekran paylaşımı izni gerekir" />
+      <SectionTitle title="Tablet ekranını çevir" subtitle="Android ekran paylaşımı izni gerekir" />
       <Card>
         <Button label="Ekran üstü gösterim izni ver" icon="layers-outline"
           disabled={!nativeCapture}
@@ -103,7 +105,7 @@ export default function TranslateScreen() {
           }} />
         <View style={styles.btnRow}>
           <Button label="Ekran okumayı başlat" icon="scan-outline"
-            disabled={!nativeCapture || captureOn}
+            disabled={!nativeCapture || captureOn || live?.active}
             onPress={async () => {
               try {
                 if (!(await nativeCapture?.hasOverlayPermission())) {
@@ -129,7 +131,7 @@ export default function TranslateScreen() {
         {ocrError ? <Notice kind="error" text={ocrError} /> : null}
       </Card>
 
-      <SectionTitle title="Hattı test et" subtitle="Yerel OCR gelene kadar OCR çıktısını buraya elle girin" />
+      <SectionTitle title="Metinle çeviriyi test et" />
       <Card>
         <Field
           testID="manual-ocr-input"
@@ -141,13 +143,12 @@ export default function TranslateScreen() {
           style={{ minHeight: 72, paddingTop: space.md, textAlignVertical: "top" }}
         />
         <View style={styles.btnRow}>
-          <Button testID="manual-ocr-submit-button" label="Hatta gönder" icon="send-outline" onPress={() => ingest(input)} disabled={!input.trim()} style={{ flex: 1 }} />
-          <Button testID="manual-ocr-empty-button" label="Altyazı kayboldu" icon="eye-off-outline" variant="secondary" onPress={() => ingest("")} style={{ flex: 1 }} />
+          <Button testID="manual-ocr-submit-button" label="Hatta gönder" icon="send-outline" onPress={() => ingest(input)} disabled={!input.trim() || live?.active} style={{ flex: 1 }} />
+          <Button testID="manual-ocr-empty-button" label="Altyazı kayboldu" icon="eye-off-outline" variant="secondary" onPress={() => ingest("")} disabled={live?.active} style={{ flex: 1 }} />
         </View>
         <Text testID="pipeline-stats" style={styles.meta}>
           Alınan {state.stats.received} · Çevrilen {state.stats.translated} · Tekrar atlanan {state.stats.skippedSame} · Filtrelenen {state.stats.ignored}
         </Text>
-        <Notice kind="info" text="Bu test gerçek çeviri, tekrar engelleme, gürültü filtresi ve temizleme gecikmesini çalıştırır. Gerçek OCR kaynağı (PS5 görüntüsü) sonraki aşamada bağlanacak." />
       </Card>
     </View>
   );
@@ -190,7 +191,7 @@ export default function TranslateScreen() {
         bottomOffset={24}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.content, { paddingBottom: bottomChrome + space.xl }]}
-        refreshControl={<RefreshControl refreshing={history.isRefetching} onRefresh={() => history.refetch()} tintColor={colors.brandPrimary} />}
+        refreshControl={<RefreshControl refreshing={history.isRefetching} onRefresh={() => { void history.refetch(); }} tintColor={colors.brandPrimary} />}
       >
         {wide ? (
           <View style={{ flexDirection: "row", gap: space.xl }}>

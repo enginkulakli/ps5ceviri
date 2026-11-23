@@ -1,3 +1,7 @@
+# PS5 Çevirmen
+
+Gömülü Android Remote Play, Tizen bağlantısı ve derleme adımları için [entegrasyon belgesi](memory/REMOTE_PLAY_INTEGRATION.md).
+
 # expo
 
 A small starter for a mobile app with a backend: **FastAPI with MongoDB**

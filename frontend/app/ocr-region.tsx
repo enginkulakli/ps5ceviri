@@ -3,7 +3,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RegionPreview } from "@/src/components/RegionPreview";
 import { ScreenHeader } from "@/src/components/ScreenHeader";
-import { Card, Chip, Notice, SectionTitle, Stepper } from "@/src/components/ui";
+import { Card, Chip, SectionTitle, Stepper } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
 import { OcrRegion } from "@/src/native/bridge";
 import { useSettings } from "@/src/settings";
@@ -55,11 +55,8 @@ export default function OcrRegionScreen() {
           <Stepper testID="region-height" label="Yükseklik" display={pct(r.h)} onDec={() => set({ h: r.h - 0.02 })} onInc={() => set({ h: r.h + 0.02 })} />
           <Stepper testID="region-left" label="Sol kenar" display={pct(r.x)} onDec={() => set({ x: r.x - 0.02 })} onInc={() => set({ x: r.x + 0.02 })} />
           <Stepper testID="region-width" label="Genişlik" display={pct(r.w)} onDec={() => set({ w: r.w - 0.02 })} onInc={() => set({ w: r.w + 0.02 })} />
-          <Text style={styles.meta}>Değerler video karesine göre oranlıdır; 720p ve 1080p akışta aynı alan kullanılır.</Text>
+          <Text style={styles.meta}>Yüzdeler PS5 video karesine göre hesaplanır.</Text>
         </Card>
-        <View style={{ marginTop: space.lg }}>
-          <Notice kind="info" text="Gerçek oyun karesi üzerinde canlı önizleme, Remote Play yerel modülü bağlandığında bu ekrana eklenecek." />
-        </View>
       </ScrollView>
     </View>
   );

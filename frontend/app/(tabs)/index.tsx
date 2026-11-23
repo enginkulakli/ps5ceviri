@@ -5,11 +5,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { TvServerPanel } from "@/src/components/TvServerPanel";
-import { BadgeKind, Card, IconName, SectionTitle, StatusBadge } from "@/src/components/ui";
+import { BadgeKind, Button, Card, IconName, Notice, SectionTitle, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
 import { hasNative, nativeAvailable } from "@/src/native/bridge";
-import { usePipeline } from "@/src/pipeline/PipelineProvider";
+import { useRemotePlay } from "@/src/native/RemotePlayProvider";
 import { useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useTvServer } from "@/src/tv/TvServerProvider";
@@ -21,50 +21,33 @@ export default function Dashboard() {
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
   const { width } = useWindowDimensions();
   const cols = width >= 1000 ? 3 : width >= 640 ? 2 : 1;
-  const { state } = usePipeline();
+  const { status, busy, error, toggle } = useRemotePlay();
   const { settings } = useSettings();
   const tv = useTvServer();
   const tvKind: BadgeKind = !nativeAvailable ? "native" : tv.state?.running ? (tv.state.clientCount > 0 ? "ready" : "busy") : "idle";
   const tvLabel = !nativeAvailable ? undefined : tv.state?.running ? (tv.state.clientCount > 0 ? `${tv.state.clientCount} TV bağlı` : "Sunucu açık, TV bekleniyor") : "Sunucu kapalı";
 
-  const engineKind: BadgeKind =
-    settings.engine === "offline" && !hasNative("translateOffline")
-      ? "native"
-      : state.engineState === "error"
-        ? "error"
-        : state.engineState === "translating"
-          ? "busy"
-          : "ready";
-
-  const cards: { id: string; title: string; icon: IconName; kind: BadgeKind; label?: string; detail: string }[] = [
-    { id: "ps5", title: "PS5 bağlantısı", icon: "game-controller-outline", kind: "native", label: "Sonraki aşama", detail: settings.consoles.length ? `${settings.consoles.length} konsol kayıtlı (yerel ayar)` : "Konsol eklenmedi" },
-    { id: "session", title: "Remote Play oturumu", icon: "radio-outline", kind: "native", label: "Sonraki aşama", detail: "chiaki-ng motoru yerel modülde çalışacak" },
-    { id: "tv", title: "TV bağlantısı", icon: "tv-outline", kind: tvKind, label: tvLabel, detail: `ws://${tv.state?.localIp ?? "TABLET_IP"}:${settings.tvPort}` },
-    { id: "ocr", title: "OCR", icon: "scan-outline", kind: "native", label: "Sonraki aşama", detail: `Alan: alt %${Math.round(settings.ocrRegion.h * 100)} · ${settings.ocrIntervalMs} ms` },
-    {
-      id: "engine",
-      title: "Çeviri motoru",
-      icon: "language-outline",
-      kind: engineKind,
-      detail:
-        settings.engine === "online"
-          ? `Çevrimiçi YZ · ${state.lastLatencyMs != null ? `${state.lastLatencyMs} ms` : "hazır"}`
-          : "Çevrimdışı ML Kit",
-    },
-  ];
-
-  const flow: { label: string; ok: boolean }[] = [
-    { label: "PS5", ok: false },
-    { label: "Decoder", ok: false },
-    { label: "OCR", ok: false },
-    { label: "Çeviri", ok: settings.engine === "online" },
-    { label: "TV", ok: !!tv.state?.running },
+  const streaming = status?.video.startsWith("H.264") === true;
+  const stageKind: BadgeKind = !nativeAvailable ? "native" : status?.active ? "busy" : "idle";
+  const cards: { id: string; title: string; icon: IconName; kind: BadgeKind; label?: string; detail?: string }[] = [
+    { id: "ps5", title: "PS5 bağlantısı", icon: "game-controller-outline", kind: status?.console === "PS5 bağlı" ? "ready" : stageKind, label: status?.console, detail: status?.host ?? undefined },
+    { id: "session", title: "Remote Play oturumu", icon: "radio-outline", kind: streaming ? "ready" : stageKind, label: status?.session },
+    { id: "video", title: "Görüntü akışı", icon: "videocam-outline", kind: streaming ? "ready" : stageKind, label: status?.video },
+    { id: "ocr", title: "OCR", icon: "scan-outline", kind: streaming ? "ready" : stageKind, label: status?.ocr, detail: `${settings.ocrIntervalMs} ms` },
+    { id: "engine", title: "Çeviri motoru", icon: "language-outline", kind: status?.translation === "ML Kit hazır" ? "ready" : stageKind, label: status?.translation, detail: "ML Kit · İngilizce → Türkçe" },
+    { id: "tv", title: "TV bağlantısı", icon: "tv-outline", kind: tvKind, label: tvLabel, detail: `ws://${tv.state?.localIp ?? "TABLET_IP"}:${tv.state?.port ?? settings.tvPort}` },
   ];
 
   return (
     <View style={styles.root} testID="dashboard-screen">
       <ScreenHeader title="PS5 Çevirmen" subtitle="İngilizce → Türkçe gerçek zamanlı altyazı" />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomChrome + space.xl }]}>
+        <Card>
+          <Button testID="toggle-live-translation" label={status?.active ? "Çeviriyi Durdur" : "Çeviriyi Başlat"}
+            icon={status?.active ? "stop-circle-outline" : "play-outline"} loading={busy}
+            disabled={!hasNative("startSession")} onPress={toggle} />
+          {error || status?.error ? <Notice kind="error" text={(error ?? status?.error)!} /> : null}
+        </Card>
         <SectionTitle title="Bağlantı durumu" />
         <View style={styles.grid}>
           {cards.map((c) => (
@@ -77,7 +60,7 @@ export default function Dashboard() {
                   <Text style={styles.cardTitle}>{c.title}</Text>
                 </View>
                 <StatusBadge kind={c.kind} label={c.label} testID={`status-badge-${c.id}`} />
-                <Text style={styles.cardDetail}>{c.detail}</Text>
+                {c.detail ? <Text style={styles.cardDetail}>{c.detail}</Text> : null}
               </Card>
             </View>
           ))}
@@ -86,29 +69,12 @@ export default function Dashboard() {
         <SectionTitle title="TV sunucusu" subtitle="Gerçek durum, Android servisinden okunur" />
         <TvServerPanel idPrefix="dash" />
 
-        <SectionTitle title="İşlem hattı" subtitle="Yeşil: çalışıyor · Kehribar: henüz yok / kapalı" />
-        <Card testID="pipeline-flow">
-          <View style={styles.flow}>
-            {flow.map((f, i) => (
-              <View key={f.label} style={styles.flowItem}>
-                <View style={[styles.flowNode, { borderColor: f.ok ? colors.success : colors.warning }]}>
-                  <Text style={[styles.flowText, { color: f.ok ? colors.success : colors.warning }]}>{f.label}</Text>
-                </View>
-                {i < flow.length - 1 ? <Ionicons name="arrow-forward" size={16} color={colors.muted} /> : null}
-              </View>
-            ))}
-          </View>
-        </Card>
-
         <SectionTitle title="Son altyazı" />
         <Card testID="dashboard-current-subtitle">
-          <Text style={styles.en} numberOfLines={2}>
-            {state.english || "Henüz algılanan metin yok"}
-          </Text>
-          <Text style={styles.tr} numberOfLines={3}>
-            {state.turkish || "—"}
-          </Text>
-          <Text style={styles.cardDetail}>Son olay: {state.lastEvent}</Text>
+          <Text style={styles.cardDetail}>Son algılanan İngilizce</Text>
+          <Text style={styles.en} numberOfLines={2}>{status?.english || "—"}</Text>
+          <Text style={styles.cardDetail}>TV’ye son gönderilen Türkçe</Text>
+          <Text style={styles.tr} numberOfLines={3}>{status?.turkish || "—"}</Text>
         </Card>
 
         <Pressable testID="open-technical-report" onPress={() => router.push("/report")} style={({ pressed }) => [styles.reportLink, pressed && { opacity: 0.8 }]}>
@@ -132,10 +98,6 @@ const useStyles = makeStyles((c) => ({
   iconBox: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: c.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   cardTitle: { fontFamily: fonts.textSemi, fontSize: 15, color: c.onSurface, flex: 1 },
   cardDetail: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
-  flow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.sm },
-  flowItem: { flexDirection: "row", alignItems: "center", gap: space.sm },
-  flowNode: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: space.md, height: 36, justifyContent: "center" },
-  flowText: { fontFamily: fonts.displaySemi, fontSize: 16, letterSpacing: 0.5 },
   en: { fontFamily: fonts.text, fontSize: 14, color: c.muted },
   tr: { fontFamily: fonts.textSemi, fontSize: 20, lineHeight: 28, color: c.onSurface },
   reportLink: { marginTop: space.xl, flexDirection: "row", alignItems: "center", gap: space.md, backgroundColor: c.brandTertiary, borderRadius: radius.md, padding: space.lg, minHeight: 64 },

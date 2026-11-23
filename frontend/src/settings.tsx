@@ -22,6 +22,7 @@ export type Settings = {
   tvPort: number;
   tvIp: string;
   consoles: Console[];
+  selectedConsoleId: string | null;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,7 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ocrIntervalMs: 300,
   sensitivity: 0.5,
   repeatWindowMs: 4000,
-  clearDelayMs: 1200,
+  clearDelayMs: 2000,
   autoConnect: true,
   foregroundService: true,
   keepWifiAwake: true,
@@ -41,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tvPort: 8787,
   tvIp: "",
   consoles: [],
+  selectedConsoleId: null,
 };
 
 const KEY = "app_settings_v1";
@@ -58,7 +60,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const raw = await storage.getItem(KEY, null);
       if (typeof raw === "string") {
         try {
-          setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+          const saved = JSON.parse(raw);
+          const migratedDelay = saved.selectedConsoleId === undefined && saved.clearDelayMs === 1200
+            ? DEFAULT_SETTINGS.clearDelayMs : saved.clearDelayMs ?? DEFAULT_SETTINGS.clearDelayMs;
+          setSettings({ ...DEFAULT_SETTINGS, ...saved, clearDelayMs: migratedDelay });
         } catch {}
       }
       setReady(true);

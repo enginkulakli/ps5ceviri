@@ -8,6 +8,7 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { fontAssets } from "@/src/fonts";
+import { RemotePlayProvider } from "@/src/native/RemotePlayProvider";
 import { PipelineProvider } from "@/src/pipeline/PipelineProvider";
 import { queryClient } from "@/src/query-client";
 import { SettingsProvider } from "@/src/settings";
@@ -34,16 +35,18 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <SettingsProvider>
             <TvServerProvider>
-            <PipelineProvider>
-              <KeyboardProvider>
-                <StatusBar style="light" />
-                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }}>
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen name="report" />
-                  <Stack.Screen name="ocr-region" />
-                </Stack>
-              </KeyboardProvider>
-            </PipelineProvider>
+              <RemotePlayProvider>
+                <PipelineProvider>
+                  <KeyboardProvider>
+                    <StatusBar style="light" />
+                    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface } }}>
+                      <Stack.Screen name="(tabs)" />
+                      <Stack.Screen name="report" />
+                      <Stack.Screen name="ocr-region" />
+                    </Stack>
+                  </KeyboardProvider>
+                </PipelineProvider>
+              </RemotePlayProvider>
             </TvServerProvider>
           </SettingsProvider>
         </QueryClientProvider>

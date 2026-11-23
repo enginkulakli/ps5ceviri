@@ -7,8 +7,11 @@ on:
   push:
     branches:
       - feature/screen-ocr-foundation
+      - feature/ps5-remote-play-subtitles
     paths:
       - 'frontend/**'
+      - 'third_party/chiaki-ng'
+      - '.gitmodules'
       - '.github/workflows/android-ocr-build.yml'
 jobs:
   apk:
@@ -22,20 +25,23 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-      # GitHub ubuntu-latest runners already provide the Android SDK.
-      # setup-android@v3 currently requests the removed legacy "tools" package.
-      - name: Check Android SDK
+          java-version: '21'
+      - name: Install Android SDK and native build dependencies
         run: |
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          test -d "${ANDROID_HOME}"
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --version || "${ANDROID_HOME}/cmdline-tools/16.0/bin/sdkmanager" --version
+          sdkmanager --install 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          sudo apt-get update -qq
+          sudo apt-get install -y protobuf-compiler python3-protobuf
+          if grep -q 'third_party/chiaki-ng' .gitmodules 2>/dev/null; then
+            git submodule update --init --depth 1 third_party/chiaki-ng
+            git -C third_party/chiaki-ng submodule update --init --depth 1 \
+              third-party/nanopb third-party/jerasure third-party/gf-complete third-party/curl
+          fi
       - name: Install JS dependencies
         working-directory: frontend
         run: yarn install --frozen-lockfile
       - name: Generate Android project
         working-directory: frontend
-        run: npx expo prebuild --platform android --non-interactive
+        run: CI=1 npx expo prebuild --platform android
       # Samsung Android 16 rejects some R8-optimized service bytecode with VerifyError.
       # Keep release JS bundling, but disable R8 minification for this test build.
       - name: Disable release bytecode shrinking (fix VerifyError)
@@ -62,7 +68,7 @@ jobs:
           chmod +x gradlew
           for attempt in 1 2 3; do
             echo "Gradle build attempt ${attempt}/3"
-            if ./gradlew assembleRelease --stacktrace --refresh-dependencies; then
+            if ./gradlew assembleRelease --stacktrace -PreactNativeArchitectures=arm64-v8a; then
               exit 0
             fi
             if [ "$attempt" -eq 3 ]; then
@@ -73,6 +79,6 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: ps5ceviri-ocr-standalone-release-apk
+          name: ps5ceviri-standalone-arm64-apk
           path: frontend/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error

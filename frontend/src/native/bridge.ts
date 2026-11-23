@@ -1,8 +1,17 @@
-// Bridge to the native Android module "Ps5Translator" (modules/ps5-translator, Kotlin).
-// Implemented now: TV WebSocket server (ws://TABLET_IP:8787) in a foreground service.
-// Not implemented yet (later phases): PS5 Remote Play (chiaki-ng), MediaCodec, ML Kit OCR / offline translation.
-// In Expo Go / web preview the module does not exist; the UI then says so instead of faking success.
 import { requireOptionalNativeModule } from "expo";
+
+export type RemotePlayStatus = {
+  active: boolean;
+  host: string | null;
+  console: string;
+  session: string;
+  video: string;
+  ocr: string;
+  translation: string;
+  english: string;
+  turkish: string;
+  error: string | null;
+};
 
 export type OcrRegion = { x: number; y: number; w: number; h: number };
 
@@ -30,7 +39,6 @@ export type SendStatus = "sent" | "duplicate" | "no_clients" | "not_running";
 export type SendResult = { status: SendStatus; clients: number };
 
 export interface Ps5TranslatorNativeModule {
-  // ---- implemented (Kotlin) ----
   getServerState(): Promise<TvServerState>;
   getLocalIpAddress(): Promise<string | null>;
   startTvServer(port: number, allowedTvIp: string | null): Promise<TvServerState>;
@@ -51,25 +59,25 @@ export interface Ps5TranslatorNativeModule {
   getBackgroundTranslationStatus(): Promise<{enabled: boolean; status: string; english: string; turkish: string}>;
   stopScreenCapture(): Promise<void>;
   recognizeLatestScreen(): Promise<Array<{text: string; left: number; top: number; right: number; bottom: number}>>;
-  openExternalRemotePlay(): Promise<boolean>; // launches an installed Chiaki client; no embedded stream\n  // ---- later phases (not implemented natively yet) ----
-  discoverConsoles?(timeoutMs: number): Promise<DiscoveredConsole[]>;
-  registerConsole?(host: string, psnAccountIdBase64: string, pin: string): Promise<{ registKey: string; morning: string }>;
-  startSession?(host: string): Promise<void>;
-  stopSession?(): Promise<void>;
-  configureOcr?(region: OcrRegion, intervalMs: number, minConfidence: number): Promise<void>;
-  ensureOfflineModel?(source: string, target: string): Promise<void>;
-  translateOffline?(text: string, source: string, target: string): Promise<string>;
+  openExternalRemotePlay(): Promise<boolean>;
+  discoverConsoles(timeoutMs: number): Promise<DiscoveredConsole[]>;
+  registerConsole(host: string, psnAccountIdBase64: string, pin: string): Promise<void>;
+  isConsoleRegistered(host: string): Promise<boolean>;
+  forgetConsole(host: string): Promise<void>;
+  startSession(host: string, options: OcrRegion & {
+    intervalMs: number; ttlMs: number; sensitivity: number; keepWifiAwake: boolean;
+  }): Promise<void>;
+  stopSession(): Promise<void>;
+  getRemotePlayStatus(): Promise<RemotePlayStatus>;
+  translateOffline(text: string, source: string, target: string): Promise<string>;
 }
 
 export const nativeModule = requireOptionalNativeModule<Ps5TranslatorNativeModule>("Ps5Translator");
 export const nativeAvailable = nativeModule != null;
 
 export function hasNative(fn: keyof Ps5TranslatorNativeModule): boolean {
-  return nativeModule != null && typeof (nativeModule as any)[fn] === "function";
+  return nativeModule != null && typeof nativeModule[fn] === "function";
 }
 
 export const NATIVE_REQUIRED_MESSAGE =
-  "TV sunucusu yerel Android modülünde çalışır. Expo Go ve web önizlemede yoktur; Android APK derlemesi (Publish → Android build) ile kurulan uygulamada çalışır.";
-
-export const NOT_IMPLEMENTED_MESSAGE =
-  "Bu özellik henüz uygulanmadı (PS5 Remote Play / chiaki-ng aşaması). Sahte bağlantı gösterilmiyor.";
+  "PS5 bağlantısı ve TV sunucusu Android APK ile kullanılabilir.";

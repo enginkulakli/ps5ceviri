@@ -1,5 +1,5 @@
 import * as Network from "expo-network";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,7 +9,8 @@ import { TvServerPanel } from "@/src/components/TvServerPanel";
 import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
-import { hasNative, nativeModule, NOT_IMPLEMENTED_MESSAGE, Ps5TranslatorNativeModule } from "@/src/native/bridge";
+import { hasNative, nativeModule, NATIVE_REQUIRED_MESSAGE, Ps5TranslatorNativeModule } from "@/src/native/bridge";
+import { useRemotePlay } from "@/src/native/RemotePlayProvider";
 import { PSN_ACCOUNT_KEY, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useTvServer } from "@/src/tv/TvServerProvider";
@@ -26,7 +27,11 @@ export default function ConnectScreen() {
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
   const { width } = useWindowDimensions();
   const wide = width >= 900;
-  const { settings, update } = useSettings();
+  const { settings, ready, update } = useSettings();
+  const { status } = useRemotePlay();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const automaticDiscovery = useRef(false);
 
   const [tabletIp, setTabletIp] = useState<string | null>(null);
   const [wifi, setWifi] = useState<string>("");
@@ -53,12 +58,12 @@ export default function ConnectScreen() {
 
   useEffect(() => {
     loadNetwork();
-    storage.secureGet(PSN_ACCOUNT_KEY, null).then((v) => setAccountSaved(!!v));
+    if (Platform.OS === "android") storage.secureGet(PSN_ACCOUNT_KEY, null).then((v) => setAccountSaved(!!v));
   }, []);
 
   const needNative = async (key: string, setMsg: (m: Msg) => void, fn: () => Promise<string>, nativeFn: keyof Ps5TranslatorNativeModule) => {
     if (!hasNative(nativeFn)) {
-      setMsg({ kind: "warning", text: NOT_IMPLEMENTED_MESSAGE });
+      setMsg({ kind: "warning", text: NATIVE_REQUIRED_MESSAGE });
       return;
     }
     setBusy(key);
@@ -72,21 +77,24 @@ export default function ConnectScreen() {
   };
 
   const addConsole = () => {
-    if (!IP_RE.test(host.trim())) {
+    if (!IP_RE.test(host.trim()) || /^(0|127|22[4-9]|2[3-5]\d)\./.test(host.trim())) {
       setHostErr("Geçerli bir IPv4 adresi girin (örn. 192.168.1.40)");
       return;
     }
     setHostErr(null);
-    update({ consoles: [...settings.consoles, { id: String(Date.now()), name: name.trim() || "PS5", host: host.trim(), registered: false }] });
+    const existing = settings.consoles.find((console) => console.host === host.trim());
+    const console = existing ?? { id: host.trim(), name: name.trim() || "PS5", host: host.trim(), registered: false };
+    update({ consoles: existing ? settings.consoles : [...settings.consoles, console], selectedConsoleId: console.id });
     setName("");
     setHost("");
     setPsMsg({ kind: "success", text: "Konsol eklendi. Bağlanmak için cihaz kaydı gerekir." });
   };
 
   const saveAccount = async () => {
+    if (!hasNative("registerConsole")) return;
     const v = accountId.trim();
-    if (!/^[A-Za-z0-9+/=]{8,}$/.test(v)) {
-      setPsMsg({ kind: "error", text: "PSN Account ID base64 formatında olmalıdır (kullanıcı adı veya şifre DEĞİL)." });
+    if (!/^[A-Za-z0-9+/]{11}=?$/.test(v)) {
+      setPsMsg({ kind: "error", text: "PSN Account ID, Base64 biçiminde 8 bayt olmalıdır." });
       return;
     }
     const ok = await storage.secureSet(PSN_ACCOUNT_KEY, v);
@@ -95,36 +103,51 @@ export default function ConnectScreen() {
     setPsMsg(ok ? { kind: "success", text: "PSN Account ID cihazın güvenli deposuna kaydedildi." } : { kind: "error", text: "Güvenli depoya yazılamadı." });
   };
 
+  const discover = () => needNative("discover", setPsMsg, async () => {
+    const found = await nativeModule!.discoverConsoles(3000);
+    const current = settingsRef.current;
+    const known = new Set(current.consoles.map((console) => console.host));
+    const added = await Promise.all(found.filter((console) => !known.has(console.host)).map(async (console) => ({
+      id: console.host, name: console.name, host: console.host,
+      registered: await nativeModule!.isConsoleRegistered(console.host),
+    })));
+    const latest = settingsRef.current;
+    const newConsoles = added.filter((console) => !latest.consoles.some((existing) => existing.host === console.host));
+    if (newConsoles.length) {
+      update({ consoles: [...latest.consoles, ...newConsoles],
+        selectedConsoleId: latest.selectedConsoleId ?? latest.consoles[0]?.id ?? newConsoles[0].id });
+    }
+    return found.length
+      ? found.map((console) => `${console.name} (${console.host}) · ${console.state === "ready" ? "Açık" : "Dinlenme modu"}`).join("\n")
+      : "PS5 bulunamadı. Konsolun açık ve tabletle aynı yerel ağda olduğunu kontrol edin.";
+  }, "discoverConsoles");
+
+  useEffect(() => {
+    if (!ready || automaticDiscovery.current || !hasNative("discoverConsoles")) return;
+    automaticDiscovery.current = true;
+    void discover();
+    // Run once when the connection screen first opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  const selected = settings.consoles.find((console) => console.id === settings.selectedConsoleId)
+    ?? settings.consoles.find((console) => console.registered) ?? settings.consoles[0];
+
   const tvServer = useTvServer();
   const shownIp = tvServer.state?.localIp ?? tabletIp;
   const wsUrl = `ws://${shownIp ?? "TABLET_IP"}:${settings.tvPort}`;
 
   const ps5 = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="PS5 bağlantısı" subtitle="Yerel ağda gerçek PS5 keşfi · Remote Play motoru hazırlık aşamasında" />
+      <SectionTitle title="PS5 bağlantısı" subtitle="Yerel ağ · Remote Play" />
       <Card testID="ps5-section">
         <View style={styles.rowBetween}>
-          <Text style={styles.label}>Remote Play motoru</Text>
-          <StatusBadge kind="native" label="Keşif var · video motoru bekleniyor" testID="ps5-engine-badge" />
+          <Text style={styles.label}>Remote Play oturumu</Text>
+          <StatusBadge kind={status?.error ? "error" : status?.active ? "ready" : "idle"}
+            label={status?.session ?? "Kapalı"} testID="ps5-engine-badge" />
         </View>
-        <Button testID="open-chiaki-button" label="Chiaki ile Remote Play aç (geçici)" icon="open-outline" variant="secondary" loading={busy === "chiaki"}
-          onPress={() => needNative("chiaki", setPsMsg, async () => {
-            await nativeModule!.openExternalRemotePlay();
-            return "Chiaki açıldı. PS5 eşleştirmesini Chiaki içinde yapın; ardından ekran yakalama izni verip çeviriyi başlatın.";
-          }, "openExternalRemotePlay")}
-        />
-        <Notice kind="info" text="Geçici yöntem: Chiaki ayrı uygulamada açılır. Gömülü, arka planda çalışan Remote Play motoru henüz yoktur." />
-        <Button testID="discover-consoles-button" label="Ağda konsol bul" icon="search-outline" variant="secondary" loading={busy === "discover"}
-          onPress={() => needNative("discover", setPsMsg, async () => {
-            const list = await nativeModule!.discoverConsoles!(3000);
-            if (list.length) {
-              const known = new Set(settings.consoles.map((c) => c.host));
-              const added = list.filter((c) => !known.has(c.host)).map((c, i) => ({ id: `${Date.now()}-${i}`, name: c.name, host: c.host, registered: false }));
-              if (added.length) update({ consoles: [...settings.consoles, ...added] });
-            }
-            return list.length ? `${list.length} konsol bulundu ve listeye eklendi: ${list.map((c) => `${c.name} (${c.host})`).join(", ")}` : "Konsol bulunamadı. PS5 açık, Remote Play etkin ve tablet aynı Wi-Fi ağında mı?";
-          }, "discoverConsoles")}
-        />
+        <Button testID="discover-consoles-button" label="Ağda konsol bul" icon="search-outline" variant="secondary"
+          loading={busy === "discover"} disabled={busy !== null} onPress={discover} />
         <View style={styles.divider} />
         <Text style={styles.label}>Manuel ekle</Text>
         <Field testID="console-name-input" label="Ad" placeholder="Salon PS5" value={name} onChangeText={setName} />
@@ -138,7 +161,18 @@ export default function ConnectScreen() {
                   <Text style={styles.consoleName}>{c.name}</Text>
                   <Text style={styles.meta}>{c.host} · {c.registered ? "Kayıtlı" : "Kayıtsız"}</Text>
                 </View>
-                <Button testID={`remove-console-${c.id}`} label="Sil" variant="danger" style={{ minHeight: 44 }} onPress={() => update({ consoles: settings.consoles.filter((x) => x.id !== c.id) })} />
+                <Button testID={`select-console-${c.id}`} label={selected?.id === c.id ? "Seçili" : "Seç"}
+                  variant="secondary" disabled={selected?.id === c.id || status?.active}
+                  onPress={() => update({ selectedConsoleId: c.id })} />
+                <Button testID={`remove-console-${c.id}`} label="Sil" variant="danger" style={{ minHeight: 44 }}
+                  disabled={status?.host === c.host || busy !== null}
+                  onPress={() => needNative("forget", setPsMsg, async () => {
+                    await nativeModule!.forgetConsole(c.host);
+                    const latest = settingsRef.current;
+                    update({ consoles: latest.consoles.filter((item) => item.id !== c.id),
+                      selectedConsoleId: latest.selectedConsoleId === c.id ? null : latest.selectedConsoleId });
+                    return "Konsol kaldırıldı.";
+                  }, "forgetConsole")} />
               </View>
             ))}
           </View>
@@ -147,42 +181,27 @@ export default function ConnectScreen() {
 
       <SectionTitle title="PSN kimliği ve cihaz kaydı" />
       <Card>
-        <Notice kind="info" text="PSN şifreniz bu uygulamada istenmez ve saklanmaz. Kayıt için yalnızca sayısal PSN Account ID (base64) ve PS5'te Ayarlar → Sistem → Remote Play → Cihazı Eşle ekranındaki 8 haneli PIN gerekir." />
+        <Notice kind="info" text="PSN Account ID ve PS5’in Ayarlar → Sistem → Remote Play → Cihazı Eşle ekranındaki 8 haneli PIN gerekir." />
         <View style={styles.rowBetween}>
           <Text style={styles.label}>PSN Account ID</Text>
           <StatusBadge kind={accountSaved ? "ready" : "idle"} label={accountSaved ? "Güvenli depoda" : "Girilmedi"} testID="psn-account-badge" />
         </View>
-        <Field testID="psn-account-id-input" label="Account ID (base64)" placeholder="ör. AbCdEfGh12A=" autoCapitalize="none" secureTextEntry value={accountId} onChangeText={setAccountId} />
-        <Button testID="save-psn-account-button" label="Güvenli kaydet" icon="lock-closed-outline" variant="secondary" onPress={saveAccount} disabled={!accountId.trim()} />
-        <Field testID="register-pin-input" label="PS5 eşleme PIN'i" placeholder="12345678" keyboardType="number-pad" maxLength={8} value={pin} onChangeText={setPin} />
-        <View style={styles.btnRow}>
-          <Button testID="register-console-button" label="Cihaz kaydı" icon="key-outline" style={{ flex: 1 }} loading={busy === "register"}
-            onPress={() => needNative("register", setPsMsg, async () => {
-              const c = settings.consoles[0];
-              if (!c) throw new Error("Önce bir PS5 ekleyin.");
-              const acc = await storage.secureGet(PSN_ACCOUNT_KEY, null);
-              if (!acc) throw new Error("Önce PSN Account ID kaydedin.");
-              if (!/^\d{8}$/.test(pin)) throw new Error("PIN 8 haneli olmalıdır.");
-              const r = await nativeModule!.registerConsole!(c.host, String(acc), pin);
-              await storage.secureSet(`regist_${c.id}`, JSON.stringify(r));
-              update({ consoles: settings.consoles.map((x) => (x.id === c.id ? { ...x, registered: true } : x)) });
-              return "Kayıt başarılı.";
-            }, "registerConsole")}
-          />
-        </View>
-        <View style={styles.btnRow}>
-          <Button testID="connect-ps5-button" label="Bağlan" icon="play-outline" style={{ flex: 1 }} loading={busy === "connect"}
-            onPress={() => needNative("connect", setPsMsg, async () => {
-              const c = settings.consoles.find((x) => x.registered);
-              if (!c) throw new Error("Kayıtlı konsol yok.");
-              await nativeModule!.startSession!(c.host);
-              return "Remote Play oturumu başladı (görüntü tablette gösterilmez).";
-            }, "startSession")}
-          />
-          <Button testID="disconnect-ps5-button" label="Bağlantıyı kes" icon="stop-outline" variant="secondary" style={{ flex: 1 }}
-            onPress={() => needNative("disconnect", setPsMsg, async () => { await nativeModule!.stopSession!(); return "Oturum kapatıldı."; }, "stopSession")}
-          />
-        </View>
+        <Field testID="psn-account-id-input" label="Account ID (base64)" placeholder="ör. AbCdEfGh12A=" autoCapitalize="none" secureTextEntry value={accountId} onChangeText={setAccountId} editable={hasNative("registerConsole")} />
+        <Button testID="save-psn-account-button" label="Güvenli kaydet" icon="lock-closed-outline" variant="secondary" onPress={saveAccount} disabled={!accountId.trim() || !hasNative("registerConsole")} />
+        <Field testID="register-pin-input" label="PS5 eşleme PIN'i" placeholder="12345678" keyboardType="number-pad" maxLength={8} secureTextEntry value={pin} onChangeText={setPin} />
+        <Button testID="register-console-button" label={selected ? `${selected.name} ile eşleştir` : "PS5 ile eşleştir"}
+          icon="key-outline" loading={busy === "register"} disabled={!selected || busy !== null || status?.active}
+          onPress={() => needNative("register", setPsMsg, async () => {
+            if (!selected) throw new Error("Önce bir PS5 seçin.");
+            const account = await storage.secureGet(PSN_ACCOUNT_KEY, null);
+            if (typeof account !== "string") throw new Error("Önce PSN Account ID kaydedin.");
+            if (!/^\d{8}$/.test(pin)) throw new Error("PIN 8 haneli olmalıdır.");
+            setPin("");
+            await nativeModule!.registerConsole(selected.host, account, pin);
+            update({ consoles: settingsRef.current.consoles.map((console) => console.id === selected.id
+              ? { ...console, registered: true } : console), selectedConsoleId: selected.id });
+            return "Eşleştirme tamamlandı. Durum sekmesinden çeviriyi başlatabilirsiniz.";
+          }, "registerConsole")} />
         {psMsg ? <Notice kind={psMsg.kind} text={psMsg.text} testID="ps5-message" /> : null}
       </Card>
     </View>
@@ -203,7 +222,7 @@ export default function ConnectScreen() {
           value={tvIpDraft ?? settings.tvIp} error={tvIpErr}
           onChangeText={(v) => { setTvIpDraft(v); const t = v.trim(); if (!t || IP_RE.test(t)) { update({ tvIp: t }); setTvIpErr(null); } else setTvIpErr("Geçersiz IPv4 adresi (kaydedilmedi)"); }}
         />
-        <Text style={styles.meta}>TV uygulaması şu adrese bağlanır: {wsUrl} · mesaj formatı {'{"text":"..."}'}</Text>
+        <Text style={styles.meta}>TV uygulaması şu adrese bağlanır: {wsUrl}</Text>
       </Card>
       <View style={{ height: space.md }} />
       <TvServerPanel idPrefix="connect" />
@@ -238,7 +257,6 @@ const useStyles = makeStyles((c) => ({
   label: { fontFamily: fonts.textMedium, fontSize: 12, color: c.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   divider: { height: 1, backgroundColor: c.divider },
   meta: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
-  btnRow: { flexDirection: "row", gap: space.sm },
   consoleRow: { flexDirection: "row", alignItems: "center", gap: space.md, backgroundColor: c.surfaceTertiary, borderRadius: radius.sm, padding: space.md },
   consoleName: { fontFamily: fonts.textSemi, fontSize: 15, color: c.onSurface },
   ip: { fontFamily: fonts.display, fontSize: 34, color: c.brandPrimary, letterSpacing: 1 },

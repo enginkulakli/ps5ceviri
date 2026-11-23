@@ -25,6 +25,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/with-android-ndk",
       [
         "expo-splash-screen",
         {

@@ -31,7 +31,7 @@
 // Feel free to add as many new colors as you need to support the design guidelines.
 
 import { useMemo } from "react";
-import { Appearance, StyleSheet, useColorScheme } from "react-native";
+import { Appearance, StyleSheet, useColorScheme, type ImageStyle, type TextStyle, type ViewStyle } from "react-native";
 
 export type ColorScheme = "light" | "dark";
 
@@ -89,7 +89,7 @@ export type ThemeColors = typeof dark;
 
 export const defaultScheme = "dark" satisfies ColorScheme;
 
-export const themes: { light: ThemeColors; dark?: ThemeColors } = { dark, light: dark };
+export const themes: Record<ColorScheme, ThemeColors> = { dark, light: dark };
 
 // In-app theme toggle, only after `dark` exists in `themes`. Call
 // setColorScheme("dark"), setColorScheme("light"), or setColorScheme(null) to
@@ -114,8 +114,8 @@ export function useTheme(): { scheme: ColorScheme; colors: ThemeColors } {
 
 // Themed StyleSheet: returns a hook that builds the sheet from the active
 // scheme's colors and memoizes it until the scheme changes.
-export function makeStyles<T extends StyleSheet.NamedStyles<T> | StyleSheet.NamedStyles<any>>(
-  factory: (colors: ThemeColors) => T & StyleSheet.NamedStyles<any>,
+export function makeStyles<T extends Record<keyof T, ViewStyle | TextStyle | ImageStyle>>(
+  factory: (colors: ThemeColors) => T,
 ): () => T {
   return function useStyles(): T {
     const { colors } = useTheme();
