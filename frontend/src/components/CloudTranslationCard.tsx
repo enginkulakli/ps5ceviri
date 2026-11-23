@@ -75,7 +75,7 @@ export function CloudTranslationCard() {
         onChangeText={(value) => { if (/^\d{0,9}$/.test(value)) update({ monthlyCharacters: Math.min(100000000, Number(value)) }); }} />
       <Text style={styles.detail}>Bugün {cloud?.dailyCharacters ?? 0} karakter · {cloud?.dailyRequests ?? 0} istek</Text>
       <Text style={styles.detail}>Bu ay {cloud?.monthlyCharacters ?? 0} karakter · {cloud?.monthlyRequests ?? 0} istek</Text>
-      <Text style={styles.detail}>UTC dönemleriyle sayılır. Bu yerel sınırlar Google Cloud faturası için kesin harcama sınırı oluşturmaz.</Text>
+      <Text style={styles.detail}>Bağlantı testi 5 karakterlik bir çeviri isteği gönderir. UTC sayaçları gönderim denemelerini içerir. Yerel sınırlar Google Cloud faturası için kesin harcama sınırı oluşturmaz.</Text>
       <View style={styles.buttons}>
         <Button label="Bağlantıyı test et" variant="secondary" loading={busy === "test"} disabled={!cloud?.configured || !!busy}
           onPress={() => act("test", async () => { await nativeModule!.testCloudConnection(settings.dailyCharacters, settings.monthlyCharacters); })} />

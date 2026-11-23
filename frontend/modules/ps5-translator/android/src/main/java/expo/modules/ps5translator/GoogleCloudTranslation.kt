@@ -1,6 +1,8 @@
 package expo.modules.ps5translator
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
@@ -130,6 +132,8 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
       conn.doOutput = true
       conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
       conn.setRequestProperty("x-goog-api-key", key)
+      conn.setRequestProperty("X-Android-Package", app.packageName)
+      appCertificate()?.let { conn.setRequestProperty("X-Android-Cert", it) }
       conn.setFixedLengthStreamingMode(payload.size)
       conn.outputStream.use { it.write(payload) }
       val code = conn.responseCode
@@ -163,6 +167,17 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
       conn.disconnect()
     }
   }
+
+  @Suppress("DEPRECATION")
+  private fun appCertificate(): String? = runCatching {
+    val manager = app.packageManager
+    val signed = if (Build.VERSION.SDK_INT >= 28) {
+      manager.getPackageInfo(app.packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners
+    } else manager.getPackageInfo(app.packageName, PackageManager.GET_SIGNATURES).signatures
+    val signature = signed?.singleOrNull() ?: return@runCatching null
+    java.security.MessageDigest.getInstance("SHA-1").digest(signature.toByteArray())
+      .joinToString("") { "%02X".format(it) }
+  }.getOrNull()
 
   override fun close() {
     closed = true

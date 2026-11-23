@@ -132,7 +132,7 @@ internal class TranslationArchive private constructor(context: Context) : SQLite
       }
       for (period in listOf(day, month)) {
         execSQL("INSERT OR IGNORE INTO usage VALUES(?,0,0)", arrayOf(period))
-        execSQL("UPDATE usage SET chars=chars+?,requests=requests+1 WHERE period=?", arrayOf(characters, period))
+        execSQL("UPDATE usage SET chars=chars+?,requests=requests+1 WHERE period=?", arrayOf<Any>(characters, period))
       }
       execSQL("DELETE FROM usage WHERE length(period)=10 AND period<?", arrayOf(month + "-01"))
     }
