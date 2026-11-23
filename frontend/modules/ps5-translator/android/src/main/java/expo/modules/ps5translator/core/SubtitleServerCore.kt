@@ -6,6 +6,8 @@ import org.java_websocket.server.WebSocketServer
 import java.net.InetSocketAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
 
 data class ClientInfo(val address: String, val connectedAtMs: Long)
 
@@ -49,6 +51,12 @@ class SubtitleServerCore(
   private var port = 8787
   @Volatile private var allowedIp: String? = null
   private val clients = LinkedHashMap<WebSocket, ClientInfo>()
+  private val version2Clients = HashSet<WebSocket>()
+  private val timer = ScheduledThreadPoolExecutor(1) { runnable ->
+    Thread(runnable, "subtitle-expiry").apply { isDaemon = true }
+  }.apply { removeOnCancelPolicy = true }
+  private var expiry: ScheduledFuture<*>? = null
+  private var expiresAt = 0L
   private var lastSentText: String? = null
   private var lastSentAtMs = 0L
   private var lastSentClients = 0
@@ -82,6 +90,7 @@ class SubtitleServerCore(
   }
 
   /** Starts (or restarts) the server. Blocks up to [timeoutMs] for bind success; returns error text or null. */
+  @Synchronized
   fun start(port: Int, allowedIp: String?, timeoutMs: Long = 4000): String? {
     stop()
     setAllowedIp(allowedIp)
@@ -114,14 +123,26 @@ class SubtitleServerCore(
     return err
   }
 
+  @Synchronized
   fun stop() {
-    val s = synchronized(lock) { server.also { server = null } } ?: return
+    val s = synchronized(lock) {
+      val current = server ?: return
+      if (!lastSentText.isNullOrEmpty()) publishLocked("", null)
+      expiry?.cancel(false)
+      expiry = null
+      expiresAt = 0L
+      lastSentText = null
+      running = false
+      server = null
+      current
+    }
     try {
       s.stop(1000, "Sunucu durduruldu")
     } catch (_: Throwable) {}
     synchronized(lock) {
       running = false
       clients.clear()
+      version2Clients.clear()
     }
     emit()
   }
@@ -130,38 +151,68 @@ class SubtitleServerCore(
 
   fun clientCount() = synchronized(lock) { clients.size }
 
-  fun send(text: String, force: Boolean = false): SendResult {
-    val s: Inner
-    val targets: List<WebSocket>
-    synchronized(lock) {
-      val srv = server
-      if (srv == null || !running) return SendResult(SendStatus.NOT_RUNNING, 0)
+  fun send(text: String, force: Boolean = false, ttlMs: Long? = null): SendResult {
+    val result = synchronized(lock) {
+      if (server == null || !running) return SendResult(SendStatus.NOT_RUNNING, 0)
       if (!force && text == lastSentText) return SendResult(SendStatus.DUPLICATE, clients.size)
-      s = srv
-      targets = clients.keys.filter { it.isOpen }
-      // Record as current even without clients: a TV connecting later gets it replayed.
-      lastSentText = text
-      lastSentAtMs = clock()
-    }
-    if (targets.isEmpty()) {
-      synchronized(lock) { lastSentClients = 0 }
-      emit()
-      return SendResult(SendStatus.NO_CLIENTS, 0)
-    }
-    val payload = SubtitleMessage.encode(text)
-    var delivered = 0
-    for (c in targets) {
-      try {
-        c.send(payload); delivered++
-      } catch (t: Throwable) {
-        recordError("Gönderim hatası (${addr(c)}): ${t.message}")
-      }
-    }
-    synchronized(lock) {
-      sentCount++
-      lastSentClients = delivered
+      publishLocked(text, ttlMs)
     }
     emit()
+    return result
+  }
+
+  /** Extends a visible subtitle without transmitting its text again. */
+  fun refresh(text: String, ttlMs: Long): Boolean = synchronized(lock) {
+    if (!running || text.isEmpty() || text != lastSentText || remainingMs() <= 0) return false
+    scheduleExpiryLocked(ttlMs)
+    val payload = "{\"type\":\"refresh\",\"ttlMs\":$ttlMs}"
+    for (client in version2Clients) if (client.isOpen) runCatching { client.send(payload) }
+    true
+  }
+
+  fun clearIfCurrent(text: String) {
+    val cleared = synchronized(lock) {
+      if (!running || text.isEmpty() || text != lastSentText) return
+      publishLocked("", null)
+      true
+    }
+    if (cleared) emit()
+  }
+
+  private fun remainingMs() = expiresAt - TimeUnit.NANOSECONDS.toMillis(System.nanoTime())
+
+  private fun scheduleExpiryLocked(ttlMs: Long) {
+    expiry?.cancel(false)
+    expiresAt = TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) + ttlMs
+    val deadline = expiresAt
+    expiry = timer.schedule({
+      val changed = synchronized(lock) {
+        if (running && expiresAt == deadline && remainingMs() <= 0 && !lastSentText.isNullOrEmpty()) {
+          publishLocked("", null)
+          true
+        } else false
+      }
+      if (changed) emit()
+    }, ttlMs, TimeUnit.MILLISECONDS)
+  }
+
+  // Replay, refresh, clear and subtitle writes are serialized so a late socket callback
+  // cannot enqueue an older subtitle behind a new one.
+  private fun publishLocked(text: String, ttlMs: Long?): SendResult {
+    lastSentText = text
+    lastSentAtMs = clock()
+    if (text.isEmpty()) {
+      expiry?.cancel(false)
+      expiry = null
+      expiresAt = 0L
+    } else scheduleExpiryLocked(ttlMs ?: 2000)
+    val payload = SubtitleMessage.encode(text, ttlMs)
+    var delivered = 0
+    for (client in clients.keys) {
+      if (client.isOpen && runCatching { client.send(payload) }.isSuccess) delivered++
+    }
+    if (delivered > 0) sentCount++
+    lastSentClients = delivered
     return SendResult(if (delivered > 0) SendStatus.SENT else SendStatus.NO_CLIENTS, delivered)
   }
 
@@ -176,6 +227,7 @@ class SubtitleServerCore(
 
     override fun onStart() {
       synchronized(lock) {
+        if (server !== this) return
         running = true
         startedAtMs = clock()
         lastError = null
@@ -194,34 +246,43 @@ class SubtitleServerCore(
         return
       }
       val stale: List<WebSocket>
-      val replay: String?
       synchronized(lock) {
         stale = clients.keys.filter { addr(it) == ip && it != conn }
-        stale.forEach { clients.remove(it) }
+        if (server !== this || !running) {
+          conn.close(1000, "server is stopping")
+          return
+        }
+        stale.forEach { clients.remove(it); version2Clients.remove(it) }
         clients[conn] = ClientInfo(ip, clock())
-        replay = lastSentText
+        val replay = lastSentText
+        val remaining = remainingMs()
+        if (!replay.isNullOrEmpty() && remaining > 0) {
+          runCatching { conn.send(SubtitleMessage.encode(replay, remaining)) }
+        }
       }
       stale.forEach { try { it.close(1000, "replaced by new connection") } catch (_: Throwable) {} }
-      if (replay != null) {
-        try { conn.send(SubtitleMessage.encode(replay)) } catch (_: Throwable) {}
-      }
       emit()
     }
 
     override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
-      val removed = synchronized(lock) { clients.remove(conn) != null }
+      val removed = synchronized(lock) {
+        version2Clients.remove(conn)
+        clients.remove(conn) != null
+      }
       if (removed) emit()
     }
 
     override fun onMessage(conn: WebSocket, message: String) {
-      // The TV app only receives; incoming messages are ignored on purpose.
+      if (message == "{\"type\":\"hello\",\"subtitleVersion\":2}") {
+        synchronized(lock) { if (conn in clients) version2Clients.add(conn) }
+      }
     }
 
     override fun onError(conn: WebSocket?, ex: Exception) {
       if (conn == null) {
         // server-level error (e.g. port already in use)
         onBindError(ex.message ?: ex.javaClass.simpleName)
-        synchronized(lock) { running = false }
+        synchronized(lock) { if (server === this) running = false }
         latch.countDown()
         recordError("Sunucu hatası: ${ex.message ?: ex.javaClass.simpleName}")
       } else {

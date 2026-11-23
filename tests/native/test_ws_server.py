@@ -4,6 +4,7 @@ Clients connect over the container's non-loopback interface IP to mimic another 
 """
 import asyncio
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import time
 import websockets
 
 JARS = "/opt/jars/Java-WebSocket-1.6.0.jar:/opt/jars/slf4j-api-2.0.13.jar"
-CP = f"/tmp/ktbuild/harness.jar:{JARS}:/opt/kt/kotlinc/lib/kotlin-stdlib.jar"
+CP = os.environ.get("PS5_WS_TEST_CLASSPATH", f"/tmp/ktbuild/harness.jar:{JARS}:/opt/kt/kotlinc/lib/kotlin-stdlib.jar")
 PORT = 8787
 results = []
 
@@ -65,7 +66,7 @@ async def main():
 
     ws = await websockets.connect(URL)
     replay = await recv(ws)
-    check("TV connecting later gets current subtitle replayed", json.loads(replay) == {"text": "Merhaba"}, replay)
+    check("TV connecting later gets current subtitle replayed", json.loads(replay)["text"] == "Merhaba" and 0 < json.loads(replay)["ttlMs"] <= 2000, replay)
     await asyncio.sleep(0.2)
 
     r = h.cmd("SEND Tekneye git, çabuk!")
@@ -143,7 +144,7 @@ async def main():
     check("send when stopped", h.cmd("SEND x") == "SEND NOT_RUNNING 0")
     check("immediate restart on same port", h.cmd(f"START {PORT} -") == "START OK")
     ws = await websockets.connect(URL)
-    await recv(ws)
+    check("server restart has no stale replay", await no_msg(ws))
 
     # port conflict reported
     blocker = socket.socket()
@@ -154,7 +155,18 @@ async def main():
     blocker.close()
     h.cmd(f"START {PORT} -")
     ws = await websockets.connect(URL)
-    await recv(ws)
+    await ws.send('{"type":"hello","subtitleVersion":2}')
+    await asyncio.sleep(0.1)
+    h.cmd("TTL 800 Zamanlı")
+    check("live messages carry the configured TTL", json.loads(await recv(ws)) == {"text": "Zamanlı", "ttlMs": 800})
+    await asyncio.sleep(0.4)
+    check("still-visible subtitle extends expiry", h.cmd("REFRESH 800 Zamanlı") == "true")
+    check("refresh sends no duplicate text", json.loads(await recv(ws)) == {"type": "refresh", "ttlMs": 800})
+    check("refresh supersedes the original timer", await no_msg(ws, 0.5))
+    check("expiry clears the subtitle", json.loads(await recv(ws)) == {"text": ""})
+    await ws.close()
+    ws = await websockets.connect(URL)
+    check("expired subtitles are not replayed", await no_msg(ws))
 
     # stability: 90 s, 1 msg / 50 ms with an idle client relying on ping/pong
     t0 = time.time()
