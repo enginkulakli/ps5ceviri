@@ -43,6 +43,7 @@ export default function RootLayout() {
                       <Stack.Screen name="(tabs)" />
                       <Stack.Screen name="report" />
                       <Stack.Screen name="ocr-region" />
+                      <Stack.Screen name="translation-archive" />
                     </Stack>
                   </KeyboardProvider>
                 </PipelineProvider>

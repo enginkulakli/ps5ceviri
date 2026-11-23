@@ -34,7 +34,7 @@ export default function Dashboard() {
     { id: "session", title: "Remote Play oturumu", icon: "radio-outline", kind: streaming ? "ready" : stageKind, label: status?.session },
     { id: "video", title: "Görüntü akışı", icon: "videocam-outline", kind: streaming ? "ready" : stageKind, label: status?.video },
     { id: "ocr", title: "OCR", icon: "scan-outline", kind: streaming ? "ready" : stageKind, label: status?.ocr, detail: `${settings.mode === "fullscreen" ? Math.max(500, settings.ocrIntervalMs) : settings.ocrIntervalMs} ms` },
-    { id: "engine", title: "Çeviri motoru", icon: "language-outline", kind: status?.translation === "ML Kit hazır" ? "ready" : stageKind, label: status?.translation, detail: settings.engine === "offline" ? "ML Kit · İngilizce → Türkçe" : "API yapılandırılmadı" },
+    { id: "engine", title: "Çeviri motoru", icon: "language-outline", kind: status?.translation === "ML Kit hazır" ? "ready" : stageKind, label: status?.translation, detail: settings.engine === "offline" ? "ML Kit · İngilizce → Türkçe" : settings.engine === "google_cloud" ? "Google Cloud · Basic v2" : "API yapılandırılmadı" },
     { id: "tv", title: "TV bağlantısı", icon: "tv-outline", kind: tvKind, label: tvLabel, detail: `ws://${tv.state?.localIp ?? "TABLET_IP"}:${tv.state?.port ?? settings.tvPort}` },
   ];
 

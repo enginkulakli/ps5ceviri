@@ -26,6 +26,11 @@ export type Settings = {
   foregroundService: boolean;
   keepWifiAwake: boolean;
   glossary: GlossaryEntry[];
+  gameId: string;
+  generalArchive: boolean;
+  shareEngines: boolean;
+  dailyCharacters: number;
+  monthlyCharacters: number;
   tvPort: number;
   tvIp: string;
   consoles: Console[];
@@ -49,6 +54,11 @@ export const DEFAULT_SETTINGS: Settings = {
   foregroundService: true,
   keepWifiAwake: true,
   glossary: [],
+  gameId: "general",
+  generalArchive: true,
+  shareEngines: false,
+  dailyCharacters: 10000,
+  monthlyCharacters: 100000,
   tvPort: 8787,
   tvIp: "",
   consoles: [],

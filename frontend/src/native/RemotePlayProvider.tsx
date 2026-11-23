@@ -19,11 +19,11 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs,
-    sensitivity, confirmations, glossary } = settings;
+    sensitivity, confirmations, glossary, gameId, generalArchive, shareEngines, dailyCharacters, monthlyCharacters } = settings;
   const settingsJson = useMemo(() => JSON.stringify({
     mode, engine, region: ocrRegion, exclusions, intervalMs: ocrIntervalMs, ttlMs: clearDelayMs,
-    minimumMs: minimumVisibleMs, sensitivity, confirmations, glossary,
-  }), [mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs, sensitivity, confirmations, glossary]);
+    minimumMs: minimumVisibleMs, sensitivity, confirmations, glossary, gameId, generalArchive, shareEngines, dailyCharacters, monthlyCharacters,
+  }), [mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs, sensitivity, confirmations, glossary, gameId, generalArchive, shareEngines, dailyCharacters, monthlyCharacters]);
   const active = status?.active;
 
   useEffect(() => {
@@ -82,7 +82,6 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
         const selected = settings.consoles.find((console) => console.id === settings.selectedConsoleId)
           ?? settings.consoles.find((console) => console.registered);
         if (!selected?.registered) throw new Error("Bağlantı sekmesinde bir PS5 seçip eşleştirin.");
-        if (engine !== "offline") throw new Error("API yapılandırılmadı");
         await nativeModule.startSession(selected.host, { settingsJson, keepWifiAwake: settings.keepWifiAwake });
         if (!tv.state?.running && tv.busy !== "start") void tv.start();
       }

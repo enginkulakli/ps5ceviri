@@ -20,7 +20,7 @@ export const REPORT: ReportSection[] = [
       { title: "Altyazı bölgesi", badge: "native", body: "Varsayılan mod karenin alt %28’ini okur. Bölge, dışlama alanları, algılama kararlılığı ve minimum gösterim süresi Ayarlar’dan değiştirilebilir." },
       { title: "Tam ekran çeviri", badge: "native", body: "Metin blokları kendi konumlarında V2 TV uygulamasına gönderilir. Mod değişiklikleri aynı Remote Play oturumu içinde uygulanır." },
       { title: "Cihaz içi İngilizce → Türkçe", badge: "native", body: "Dil paketleri Ayarlar’dan yönetilir. İndirilmiş paketlerle ve oyun sözlüğüyle çeviri tablette çalışır." },
-      { title: "Google Cloud ve yapay zekâ sağlayıcıları", badge: "info", body: "API yapılandırılmadı." },
+      { title: "Google Cloud ve yerel arşiv", badge: "info", body: "Basic v2, cihazda saklanan anahtarla kullanılabilir. Aktif oyunun kayıtları ve RAM önbelleği önce denetlenir. Yapay zekâ sağlayıcısı yapılandırma bekler." },
     ],
   },
   {

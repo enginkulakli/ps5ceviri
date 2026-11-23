@@ -4,6 +4,8 @@ import { Linking, Pressable, ScrollView, Text, useWindowDimensions, View } from 
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CloudTranslationCard } from "@/src/components/CloudTranslationCard";
+import { TranslationMetricsCard } from "@/src/components/TranslationMetricsCard";
 import { GameGlossaryEditor } from "@/src/components/GameGlossaryEditor";
 import { LanguageModelsCard } from "@/src/components/LanguageModelsCard";
 import { RegionPreview } from "@/src/components/RegionPreview";
@@ -24,7 +26,7 @@ const SOURCE = [
 ];
 const ENGINES: { id: TranslationEngine; label: string; detail: string }[] = [
   { id: "offline", label: "Cihaz üzerinde · ML Kit", detail: "İndirilen dil paketleriyle çevrimdışı çeviri." },
-  { id: "google_cloud", label: "Google Cloud Translation", detail: "API yapılandırılmadı" },
+  { id: "google_cloud", label: "Google Cloud Translation", detail: "Kendi anahtarınızla Basic v2" },
   { id: "ai", label: "Yapay zekâ API çevirisi", detail: "API yapılandırılmadı" },
 ];
 
@@ -83,6 +85,14 @@ export default function SettingsScreen() {
           </Pressable>
         ))}
       </Card>
+      <SectionTitle title="Google Cloud ayarları" />
+      <CloudTranslationCard />
+      <SectionTitle title="Çeviri arşivi" />
+      <Card>
+        <Button label="Çeviri arşivini aç" icon="albums-outline" onPress={() => router.push("/translation-archive")} />
+        <ToggleRow testID="archive-general" label="Genel arşivi kullan" hint="Aktif oyunda eşleşme bulunamazsa genel arşive bakılır." value={s.generalArchive} onChange={(v) => update({ generalArchive: v })} />
+        <ToggleRow testID="archive-cross-engine" label="Motorlar arası kayıtları kullan" hint="Uygun yerel çeviriler seçili motordan bağımsız kullanılabilir." value={s.shareEngines} onChange={(v) => update({ shareEngines: v })} />
+      </Card>
       <SectionTitle title="Dil paketleri" />
       <LanguageModelsCard source={s.sourceLang} />
       <SectionTitle title="Oyun sözlüğü" />
@@ -114,6 +124,8 @@ export default function SettingsScreen() {
           onDec={() => update({ clearDelayMs: clamp(s.clearDelayMs - 200, 500, 10000) })} onInc={() => update({ clearDelayMs: clamp(s.clearDelayMs + 200, 500, 10000) })} />
       </Card>
 
+      <SectionTitle title="Çeviri performansı" />
+      <TranslationMetricsCard />
       <SectionTitle title="Bağlantı ve arka plan" />
       <Card>
         <ToggleRow testID="auto-connect-toggle" label="Otomatik bağlantı" hint="Uygulama açılınca TV sunucusunu başlat; arka planda çalış açıksa cihaz yeniden başlayınca da başlatır" value={s.autoConnect} onChange={(v) => update({ autoConnect: v })} />

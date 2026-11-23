@@ -73,7 +73,7 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
       const s = settingsRef.current;
       setState((st) => ({ ...st, english: text, engineState: "translating", error: null, lastEvent: "Çevriliyor" }));
       try {
-        if (s.engine !== "offline") throw new Error("API yapılandırılmadı");
+        if (s.engine !== "offline") throw new Error("Bu manuel test cihaz içi motoru kullanır. Google Cloud bağlantısını Ayarlar’dan test edebilirsiniz.");
         if (!nativeModule?.translateOffline) throw new Error("Çevrimdışı çeviri için Android APK gerekir.");
         const startedAt = Date.now();
         const translated = await nativeModule.translateOffline(text, s.sourceLang, s.targetLang);
