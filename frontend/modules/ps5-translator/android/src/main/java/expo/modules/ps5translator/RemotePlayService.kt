@@ -85,7 +85,7 @@ class RemotePlayService : Service() {
     attemptNumber = 0
     try {
       acquireLocks(config.keepWifiAwake)
-      pipeline = RemoteSubtitlePipeline(handler, config.translation, ::update).also { it.prepare() }
+      pipeline = RemoteSubtitlePipeline(applicationContext, handler, config.translation, ::update).also { it.prepare() }
       connect()
     } catch (e: Exception) {
       finish(e.message ?: "Çeviri başlatılamadı")
@@ -263,6 +263,11 @@ class RemotePlayService : Service() {
     internal fun configure(options: TranslationOptions) {
       val service = instance ?: return
       service.handler.post { service.pipeline?.configure(options) }
+    }
+
+    internal fun refreshCloud() {
+      val service = instance ?: return
+      service.handler.post { service.pipeline?.refreshCloud() }
     }
 
     internal fun refreshModels() {

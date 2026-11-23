@@ -152,6 +152,81 @@ class Ps5TranslatorModule : Module() {
 
     AsyncFunction("updateTranslation") { json: String -> RemotePlayService.configure(TranslationOptions.parse(json)) }
 
+    AsyncFunction("getCloudStatus") { promise: Promise ->
+      val app = context.applicationContext
+      val db = TranslationArchive.get(app)
+      db.reads.execute {
+        try {
+          val configured = GoogleKeyStore.read(app) != null
+          promise.resolve(db.currentUsage().put("configured", configured)
+            .put("status", if (configured) GoogleKeyStore.status else API_NOT_CONFIGURED).toString())
+        } catch (_: Exception) {
+          promise.reject("ERR_CLOUD_STATUS", "Google Cloud ayarları okunamadı.", null)
+        }
+      }
+    }
+
+    AsyncFunction("saveCloudKey") { key: String ->
+      GoogleKeyStore.save(context.applicationContext, key)
+      RemotePlayService.refreshCloud()
+    }
+
+    AsyncFunction("revealCloudKey") {
+      GoogleKeyStore.read(context.applicationContext)
+    }
+
+    AsyncFunction("deleteCloudKey") {
+      GoogleKeyStore.remove(context.applicationContext)
+      RemotePlayService.refreshCloud()
+    }
+
+    AsyncFunction("testCloudConnection") { daily: Int, monthly: Int, promise: Promise ->
+      val provider = GoogleCloudProvider(context.applicationContext, CloudLimits(
+        daily.coerceIn(0, 10000000), monthly.coerceIn(0, 100000000)))
+      provider.test().addOnCompleteListener { task ->
+        provider.close()
+        if (task.isSuccessful) promise.resolve("Google Cloud bağlı")
+        else promise.reject("ERR_CLOUD_TEST", task.exception?.message ?: "Google Cloud isteği tamamlanamadı.", null)
+      }
+    }
+
+    AsyncFunction("getTranslationMetrics") { TranslationMetrics.snapshot().toString() }
+
+    AsyncFunction("getArchiveOverview") { promise: Promise ->
+      val db = TranslationArchive.get(context)
+      archiveTask(db, false, promise) {
+        org.json.JSONObject().put("games", db.games()).put("bytes", db.byteSize()).toString()
+      }
+    }
+
+    AsyncFunction("createArchiveGame") { name: String, promise: Promise ->
+      val db = TranslationArchive.get(context)
+      archiveTask(db, true, promise) { db.createGame(name) }
+    }
+
+    AsyncFunction("getArchivePage") { game: String, search: String, before: Double, promise: Promise ->
+      val db = TranslationArchive.get(context)
+      archiveTask(db, false, promise) { db.page(game, search, before.toLong()).toString() }
+    }
+
+    AsyncFunction("editArchiveRecord") { id: Double, translated: String, promise: Promise ->
+      val db = TranslationArchive.get(context)
+      archiveTask(db, true, promise) { db.edit(id.toLong(), translated); null }
+    }
+
+    AsyncFunction("deleteArchiveRecord") { id: Double, promise: Promise ->
+      val db = TranslationArchive.get(context)
+      archiveTask(db, true, promise) { db.delete(id.toLong()); null }
+    }
+
+    AsyncFunction("exportTranslationArchive") { game: String?, promise: Promise ->
+      ArchiveTransferActivity.open(context, true, game, promise)
+    }
+
+    AsyncFunction("importTranslationArchive") { promise: Promise ->
+      ArchiveTransferActivity.open(context, false, null, promise)
+    }
+
     AsyncFunction("getLanguageModels") { promise: Promise ->
       LanguageModels.downloaded().addOnCompleteListener { task ->
         if (task.isSuccessful) promise.resolve(task.result.map { it.language }.sorted())
@@ -340,6 +415,18 @@ class Ps5TranslatorModule : Module() {
         context.startActivity(intent)
       } catch (_: Throwable) {
         context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+      }
+    }
+  }
+
+  private fun archiveTask(db: TranslationArchive, write: Boolean, promise: Promise, action: () -> Any?) {
+    val executor = if (write) db.writes else db.reads
+    executor.execute {
+      try { promise.resolve(action()) }
+      catch (e: Exception) {
+        val message = if (e is IllegalArgumentException || e is IllegalStateException) e.message
+          else "Arşiv işlemi tamamlanamadı."
+        promise.reject("ERR_ARCHIVE", message, null)
       }
     }
   }

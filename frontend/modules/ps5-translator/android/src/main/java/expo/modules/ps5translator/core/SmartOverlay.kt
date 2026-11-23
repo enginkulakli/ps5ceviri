@@ -1,18 +1,17 @@
 package expo.modules.ps5translator.core
 
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
 
 internal data class OcrLine(val text: String, val rect: FrameRect, val group: Int)
 
 private val controls = Regex("(?:scroll|set waypoint|back|select|return|navigate)(?:\\s+[a-z0-9])?", RegexOption.IGNORE_CASE)
-private val badge = Regex("(?:remote play (?:connection|connected|in progress)|uzaktan oynama bağlant[ıi].*)", RegexOption.IGNORE_CASE)
-private val menu = Regex("(?:[n0-9|()■□◯]{1,3}\\s+)?(map|game|store|help|photo studio|settings)(?:\\s+[o0|])?", RegexOption.IGNORE_CASE)
+private val badge = Regex("(?:remote play (?:connection|connected|in progress)(?:[ .…].*)?|uzaktan oynama bağlant[ıi].*)", RegexOption.IGNORE_CASE)
+private val menu = Regex("(?:[ndopil0-9|()■□◯]{1,3}\\s+)?(map|game|store|help|photo studio|settings)(?:\\s+[o0|])?", RegexOption.IGNORE_CASE)
 private val roman = Regex("[IVXLCDM]{2,5}")
 
 /** Stable normalization preserves words, punctuation and all numbers outside known menu icons. */
-internal fun memoryText(value: String) = cleanOcr(value).lowercase(Locale.ROOT)
+internal fun memoryText(value: String) = cleanOcr(value)
 
 internal object SmartOcr {
   fun group(lines: List<OcrLine>): List<DetectedText> {

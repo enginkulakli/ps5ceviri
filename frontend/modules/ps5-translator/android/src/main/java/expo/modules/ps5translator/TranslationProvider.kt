@@ -1,5 +1,6 @@
 package expo.modules.ps5translator
 
+import android.content.Context
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.common.model.DownloadConditions
@@ -15,9 +16,9 @@ internal const val API_NOT_CONFIGURED = "API yapılandırılmadı"
 internal enum class EngineId(val key: String) {
   OFFLINE("offline"), GOOGLE_CLOUD("google_cloud"), AI("ai");
 
-  fun provider(): TranslationProvider = when (this) {
+  fun provider(context: Context, limits: CloudLimits): TranslationProvider = when (this) {
     OFFLINE -> MlKitProvider()
-    GOOGLE_CLOUD -> GoogleCloudProvider
+    GOOGLE_CLOUD -> GoogleCloudProvider(context, limits)
     AI -> AiProvider
   }
 }
@@ -48,7 +49,6 @@ private abstract class UnconfiguredProvider : TranslationProvider {
   final override fun close() = Unit
 }
 
-private object GoogleCloudProvider : UnconfiguredProvider()
 private object AiProvider : UnconfiguredProvider()
 
 private class MlKitProvider : TranslationProvider {

@@ -17,6 +17,8 @@ internal data class TranslationOptions(
   val sensitivity: Double,
   val confirmations: Int,
   val glossary: List<GlossaryEntry>,
+  val archive: ArchivePolicy,
+  val cloudLimits: CloudLimits,
 ) {
   companion object {
     fun parse(json: String): TranslationOptions {
@@ -41,6 +43,10 @@ internal data class TranslationOptions(
           val target = term.optString("target").trim().take(120)
           if (source.isBlank() || target.isBlank()) null else GlossaryEntry(source, target)
         },
+        ArchivePolicy(doc.optString("gameId", GENERAL_GAME).takeIf { it.matches(Regex("[a-zA-Z0-9_-]{1,80}")) } ?: GENERAL_GAME,
+          doc.optBoolean("generalArchive", true), doc.optBoolean("shareEngines", false)),
+        CloudLimits(doc.optInt("dailyCharacters", 10000).coerceIn(0, 10000000),
+          doc.optInt("monthlyCharacters", 100000).coerceIn(0, 100000000)),
       )
     }
 
