@@ -12,8 +12,10 @@ import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.time.Instant
-import java.time.ZoneOffset
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -146,7 +148,9 @@ internal class TranslationArchive private constructor(context: Context) : SQLite
   }
 
   private fun periods(): Pair<String, String> {
-    val day = Instant.now().atOffset(ZoneOffset.UTC).toLocalDate().toString()
+    val day = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+      timeZone = TimeZone.getTimeZone("UTC")
+    }.format(Date())
     return day to day.take(7)
   }
 
