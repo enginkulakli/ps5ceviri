@@ -12,6 +12,7 @@ import expo.modules.ps5translator.core.GlossaryEntry
 import expo.modules.ps5translator.core.cleanOcr
 
 fun main() {
+  smartOverlayChecks()
   val tracker = SubtitleTracker(300)
   check(!tracker.observe("Follow the lantern east.", 100))
   check(!tracker.observe("", 200))
