@@ -1,9 +1,10 @@
+import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { RegionPreview } from "@/src/components/RegionPreview";
 import { ScreenHeader } from "@/src/components/ScreenHeader";
-import { Card, Chip, SectionTitle, Stepper } from "@/src/components/ui";
+import { Button, Card, Chip, SectionTitle, Stepper } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
 import { OcrRegion } from "@/src/native/bridge";
 import { useSettings } from "@/src/settings";
@@ -24,6 +25,18 @@ export default function OcrRegionScreen() {
   const insets = useSafeAreaInsets();
   const { settings, update } = useSettings();
   const r = settings.ocrRegion;
+  const [selected, setSelected] = useState(0);
+  const areas = settings.exclusions;
+  const index = Math.min(selected, areas.length - 1);
+  const area = areas[index];
+  const updateArea = (patch: Partial<OcrRegion>) => {
+    const next = { ...area, ...patch };
+    next.w = Math.min(1, Math.max(.05, round(next.w)));
+    next.h = Math.min(1, Math.max(.05, round(next.h)));
+    next.x = Math.min(1 - next.w, Math.max(0, round(next.x)));
+    next.y = Math.min(1 - next.h, Math.max(0, round(next.y)));
+    update({ exclusions: areas.map((current, i) => i === index ? next : current) });
+  };
 
   const set = (patch: Partial<OcrRegion>) => {
     const n = { ...r, ...patch };
@@ -37,10 +50,10 @@ export default function OcrRegionScreen() {
 
   return (
     <View style={styles.root} testID="ocr-region-screen">
-      <ScreenHeader title="Altyazı alanı" subtitle="OCR yalnızca bu bölgede çalışır" back />
+      <ScreenHeader title="Altyazı alanı" subtitle="Altyazı modu" back />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
         <View style={{ marginTop: space.lg }}>
-          <RegionPreview region={r} testID="ocr-region-editor-preview" />
+          <RegionPreview region={r} exclusions={areas} testID="ocr-region-editor-preview" />
         </View>
         <SectionTitle title="Hazır alanlar" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -57,6 +70,21 @@ export default function OcrRegionScreen() {
           <Stepper testID="region-width" label="Genişlik" display={pct(r.w)} onDec={() => set({ w: r.w - 0.02 })} onInc={() => set({ w: r.w + 0.02 })} />
           <Text style={styles.meta}>Yüzdeler PS5 video karesine göre hesaplanır.</Text>
         </Card>
+        <SectionTitle title="Dışlama alanları" subtitle="Kırmızı alanlar altyazı OCR’ından çıkarılır" />
+        <Card>
+          <Button label="Sağ alt alanı ekle" icon="add-circle-outline" variant="secondary" disabled={areas.length >= 8}
+            onPress={() => { setSelected(areas.length); update({ exclusions: [...areas, { x: .8, y: .82, w: .2, h: .18 }] }); }} />
+          {area ? <>
+            <View style={styles.areaList}>
+              {areas.map((_, i) => <Chip key={i} testID={`exclusion-area-${i}`} label={`Alan ${i + 1}`} selected={i === index} onPress={() => setSelected(i)} />)}
+            </View>
+            <Stepper testID="exclusion-top" label="Üst kenar" display={pct(area.y)} onDec={() => updateArea({ y: area.y - .02 })} onInc={() => updateArea({ y: area.y + .02 })} />
+            <Stepper testID="exclusion-left" label="Sol kenar" display={pct(area.x)} onDec={() => updateArea({ x: area.x - .02 })} onInc={() => updateArea({ x: area.x + .02 })} />
+            <Stepper testID="exclusion-width" label="Genişlik" display={pct(area.w)} onDec={() => updateArea({ w: area.w - .02 })} onInc={() => updateArea({ w: area.w + .02 })} />
+            <Stepper testID="exclusion-height" label="Yükseklik" display={pct(area.h)} onDec={() => updateArea({ h: area.h - .02 })} onInc={() => updateArea({ h: area.h + .02 })} />
+            <Button label="Seçili alanı kaldır" variant="secondary" onPress={() => update({ exclusions: areas.filter((_, i) => i !== index) })} />
+          </> : null}
+        </Card>
       </ScrollView>
     </View>
   );
@@ -65,6 +93,7 @@ export default function OcrRegionScreen() {
 const useStyles = makeStyles((c) => ({
   root: { flex: 1, backgroundColor: c.surface },
   content: { paddingHorizontal: space.lg, maxWidth: 900, width: "100%", alignSelf: "center" },
+  areaList: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   chips: { gap: space.sm, alignItems: "center", height: 56 },
   meta: { fontFamily: fonts.text, fontSize: 12, color: c.muted },
 }));

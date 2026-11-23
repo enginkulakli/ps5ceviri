@@ -8,7 +8,7 @@ import { makeStyles } from "@/src/theme";
 const BG = "https://images.unsplash.com/photo-1741883203039-04549101a206?crop=entropy&cs=srgb&fm=jpg&q=60&w=1200";
 
 // 16:9 game frame with the OCR region highlighted.
-export function RegionPreview({ region, testID = "ocr-region-preview" }: { region: OcrRegion; testID?: string }) {
+export function RegionPreview({ region, exclusions = [], testID = "ocr-region-preview" }: { region: OcrRegion; exclusions?: OcrRegion[]; testID?: string }) {
   const styles = useStyles();
   return (
     <View testID={testID} style={styles.frame}>
@@ -22,6 +22,11 @@ export function RegionPreview({ region, testID = "ocr-region-preview" }: { regio
       >
         <Text style={styles.regionText}>ALTYAZI ALANI</Text>
       </View>
+      {exclusions.map((area, index) => (
+        <View key={index} style={[styles.excluded, {
+          left: `${area.x * 100}%`, top: `${area.y * 100}%`, width: `${area.w * 100}%`, height: `${area.h * 100}%`,
+        }]} />
+      ))}
     </View>
   );
 }
@@ -31,5 +36,6 @@ const useStyles = makeStyles((c) => ({
   bg: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 },
   dim: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, backgroundColor: c.surface, opacity: 0.55 },
   region: { position: "absolute", borderWidth: 2, borderColor: c.brandPrimary, backgroundColor: c.brandTertiary + "66", alignItems: "center", justifyContent: "center" },
+  excluded: { position: "absolute", borderWidth: 2, borderColor: c.error, backgroundColor: c.error + "66" },
   regionText: { fontFamily: fonts.display, fontSize: 16, color: c.onBrandTertiary, letterSpacing: 1 },
 }));

@@ -1,6 +1,6 @@
 PS5 Çevirmen for Android
 Corresponding source and build instructions:
-https://github.com/enginkulakli/ps5ceviri/tree/feature/ps5-remote-play-subtitles
+https://github.com/enginkulakli/ps5ceviri/tree/feature/v2-fullscreen-translation
 
 This build incorporates chiaki-ng at 43728af2e639fecb8a7af1cd68c29820a40de973.
 The pinned upstream source, upstream licence and OpenSSL linking exception

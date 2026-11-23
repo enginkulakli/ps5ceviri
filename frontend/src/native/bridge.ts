@@ -11,6 +11,7 @@ export type RemotePlayStatus = {
   english: string;
   turkish: string;
   error: string | null;
+  overlayClients: number;
 };
 
 export type OcrRegion = { x: number; y: number; w: number; h: number };
@@ -64,9 +65,11 @@ export interface Ps5TranslatorNativeModule {
   registerConsole(host: string, psnAccountIdBase64: string, pin: string): Promise<void>;
   isConsoleRegistered(host: string): Promise<boolean>;
   forgetConsole(host: string): Promise<void>;
-  startSession(host: string, options: OcrRegion & {
-    intervalMs: number; ttlMs: number; sensitivity: number; keepWifiAwake: boolean;
-  }): Promise<void>;
+  startSession(host: string, options: { settingsJson: string; keepWifiAwake: boolean }): Promise<void>;
+  updateTranslation(settingsJson: string): Promise<void>;
+  getLanguageModels(): Promise<string[]>;
+  downloadLanguageModel(language: string): Promise<void>;
+  removeLanguageModel(language: string): Promise<void>;
   stopSession(): Promise<void>;
   getRemotePlayStatus(): Promise<RemotePlayStatus>;
   translateOffline(text: string, source: string, target: string): Promise<string>;

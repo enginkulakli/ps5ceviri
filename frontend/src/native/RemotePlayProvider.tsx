@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 
 import { hasNative, nativeModule, type RemotePlayStatus } from "@/src/native/bridge";
@@ -18,6 +18,17 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<RemotePlayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs,
+    sensitivity, confirmations, glossary } = settings;
+  const settingsJson = useMemo(() => JSON.stringify({
+    mode, engine, region: ocrRegion, exclusions, intervalMs: ocrIntervalMs, ttlMs: clearDelayMs,
+    minimumMs: minimumVisibleMs, sensitivity, confirmations, glossary,
+  }), [mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs, sensitivity, confirmations, glossary]);
+  const active = status?.active;
+
+  useEffect(() => {
+    if (active && hasNative("updateTranslation")) void nativeModule!.updateTranslation(settingsJson).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+  }, [active, settingsJson]);
 
   useEffect(() => {
     const bridge = nativeModule;
@@ -71,13 +82,8 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
         const selected = settings.consoles.find((console) => console.id === settings.selectedConsoleId)
           ?? settings.consoles.find((console) => console.registered);
         if (!selected?.registered) throw new Error("Bağlantı sekmesinde bir PS5 seçip eşleştirin.");
-        await nativeModule.startSession(selected.host, {
-          ...settings.ocrRegion,
-          intervalMs: settings.ocrIntervalMs,
-          ttlMs: settings.clearDelayMs,
-          sensitivity: settings.sensitivity,
-          keepWifiAwake: settings.keepWifiAwake,
-        });
+        if (engine !== "offline") throw new Error("API yapılandırılmadı");
+        await nativeModule.startSession(selected.host, { settingsJson, keepWifiAwake: settings.keepWifiAwake });
         if (!tv.state?.running && tv.busy !== "start") void tv.start();
       }
       setStatus(await nativeModule.getRemotePlayStatus());

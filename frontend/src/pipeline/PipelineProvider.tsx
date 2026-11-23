@@ -1,7 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
-import { translateOnline } from "@/src/api";
 import { hasNative, nativeModule, SendStatus } from "@/src/native/bridge";
 import { SubtitleTracker, tvPayload } from "@/src/pipeline/subtitle";
 import { useSettings } from "@/src/settings";
@@ -42,14 +40,12 @@ const PipelineContext = createContext<Ctx | null>(null);
 
 export function PipelineProvider({ children }: { children: React.ReactNode }) {
   const { settings } = useSettings();
-  const qc = useQueryClient();
   const [state, setState] = useState<PipelineState>(INITIAL);
   const tracker = useRef(new SubtitleTracker({ repeatWindowMs: settings.repeatWindowMs, sensitivity: settings.sensitivity }));
   const seq = useRef(0);
-  const abort = useRef<AbortController | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   useEffect(() => {
     tracker.current.configure({ repeatWindowMs: settings.repeatWindowMs, sensitivity: settings.sensitivity });
@@ -74,47 +70,34 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
   const runTranslation = useCallback(
     async (text: string) => {
       const mySeq = ++seq.current;
-      abort.current?.abort(); // newer subtitle wins: cancel the stale request
-      const controller = new AbortController();
-      abort.current = controller;
       const s = settingsRef.current;
       setState((st) => ({ ...st, english: text, engineState: "translating", error: null, lastEvent: "Çevriliyor" }));
       try {
-        let translated: string;
-        let latency = 0;
-        let cached = false;
-        if (s.engine === "offline") {
-          if (!nativeModule?.translateOffline || !hasNative("translateOffline")) throw new Error("Çevrimdışı çeviri için Android APK gerekir.");
-          const t0 = Date.now();
-          translated = await nativeModule.translateOffline(text, s.sourceLang, s.targetLang);
-          latency = Date.now() - t0;
-        } else {
-          const r = await translateOnline(text, s.sourceLang, s.targetLang, s.glossary, s.translateQuality, controller.signal);
-          translated = r.translated_text;
-          latency = r.latency_ms;
-          cached = r.cached;
-        }
+        if (s.engine !== "offline") throw new Error("API yapılandırılmadı");
+        if (!nativeModule?.translateOffline) throw new Error("Çevrimdışı çeviri için Android APK gerekir.");
+        const startedAt = Date.now();
+        const translated = await nativeModule.translateOffline(text, s.sourceLang, s.targetLang);
+        const latency = Date.now() - startedAt;
         if (mySeq !== seq.current) return; // an older translation must never overwrite a newer one
         setState((st) => ({
           ...st,
           turkish: translated,
           engineState: "ok",
           lastLatencyMs: latency,
-          lastCached: cached,
-          lastEvent: cached ? "Önbellekten çevrildi" : "Çevrildi",
+          lastCached: false,
+          lastEvent: "Çevrildi",
           stats: { ...st.stats, translated: st.stats.translated + 1 },
         }));
         if (hasNative("showTranslationOverlay" as any)) {
           await nativeModule?.showTranslationOverlay?.(translated).catch(() => {});
         }
         await sendToTv(translated); // empty result (OCR noise) clears the TV instead of leaving a stale line
-        qc.invalidateQueries({ queryKey: ["history"] });
       } catch (e: any) {
-        if (e?.name === "AbortError" || mySeq !== seq.current) return;
+        if (mySeq !== seq.current) return;
         setState((st) => ({ ...st, engineState: "error", error: e?.message ?? "Bilinmeyen çeviri hatası", lastEvent: "Hata" }));
       }
     },
-    [qc, sendToTv],
+    [sendToTv],
   );
 
   const ingest = useCallback(
@@ -126,7 +109,6 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
         clearTimer.current = setTimeout(() => {
           clearTimer.current = null;
           seq.current++;
-          abort.current?.abort();
           tracker.current.reset();
           setState((st) => ({ ...st, english: "", turkish: "", engineState: "idle", lastLatencyMs: null, lastEvent: "Altyazı kayboldu, TV temizlendi" }));
           nativeModule?.showTranslationOverlay?.("").catch(() => {});
@@ -153,7 +135,6 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
 
   const clear = useCallback(() => {
     seq.current++;
-    abort.current?.abort();
     tracker.current.reset();
     setState((st) => ({ ...INITIAL, stats: st.stats, lastEvent: "Temizlendi" }));
     nativeModule?.showTranslationOverlay?.("").catch(() => {});

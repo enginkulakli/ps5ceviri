@@ -8,6 +8,7 @@ on:
     branches:
       - feature/screen-ocr-foundation
       - feature/ps5-remote-play-subtitles
+      - feature/v2-fullscreen-translation
     paths:
       - 'frontend/**'
       - 'third_party/chiaki-ng'

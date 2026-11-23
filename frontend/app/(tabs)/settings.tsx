@@ -1,17 +1,17 @@
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { router } from "expo-router";
-import { useState } from "react";
 import { Linking, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GameGlossaryEditor } from "@/src/components/GameGlossaryEditor";
+import { LanguageModelsCard } from "@/src/components/LanguageModelsCard";
 import { RegionPreview } from "@/src/components/RegionPreview";
 import { ScreenHeader } from "@/src/components/ScreenHeader";
-import { Button, Card, Chip, Field, Notice, SectionTitle, StatusBadge, Stepper, ToggleRow } from "@/src/components/ui";
+import { Button, Card, Chip, Notice, SectionTitle, StatusBadge, Stepper, ToggleRow } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
-import { hasNative } from "@/src/native/bridge";
-import { DEFAULT_SETTINGS, useSettings } from "@/src/settings";
+import { DEFAULT_SETTINGS, type TranslationEngine, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useTvServer } from "@/src/tv/TvServerProvider";
 
@@ -22,6 +22,12 @@ const SOURCE = [
   { code: "fr", label: "Fransızca" },
   { code: "es", label: "İspanyolca" },
 ];
+const ENGINES: { id: TranslationEngine; label: string; detail: string }[] = [
+  { id: "offline", label: "Cihaz üzerinde · ML Kit", detail: "İndirilen dil paketleriyle çevrimdışı çeviri." },
+  { id: "google_cloud", label: "Google Cloud Translation", detail: "API yapılandırılmadı" },
+  { id: "ai", label: "Yapay zekâ API çevirisi", detail: "API yapılandırılmadı" },
+];
+
 const TARGET = [{ code: "tr", label: "Türkçe" }];
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -33,13 +39,21 @@ export default function SettingsScreen() {
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
   const { width } = useWindowDimensions();
   const wide = width >= 900;
-  const { settings: s, update } = useSettings();
-  const [glossary, setGlossary] = useState(s.glossary.join(", "));
+  const { settings: s, ready, update } = useSettings();
   const tv = useTvServer();
 
   const left = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="Dil" />
+      <SectionTitle title="Çeviri modu" />
+      <Card>
+        <View style={styles.row}>
+          <Chip testID="translation-mode-subtitle" label="Altyazı çevirisi" selected={s.mode === "subtitle"} onPress={() => update({ mode: "subtitle" })} />
+          <Chip testID="translation-mode-fullscreen" label="Tam ekran çeviri" selected={s.mode === "fullscreen"} onPress={() => update({ mode: "fullscreen" })} />
+        </View>
+        <Text style={styles.meta}>{s.mode === "subtitle" ? "Seçili altyazı alanı taranır." : "Tam kare taranır. Konumlu çeviriler V2 TV uygulamasında görünür."}</Text>
+      </Card>
+
+      <SectionTitle title="Manuel test dili" />
       <Card>
         <Text style={styles.label}>Kaynak dil</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -57,50 +71,31 @@ export default function SettingsScreen() {
 
       <SectionTitle title="Çeviri motoru" />
       <Card>
-        <Pressable testID="engine-online-option" onPress={() => update({ engine: "online" })} style={[styles.option, s.engine === "online" && styles.optionOn]}>
-          <Ionicons name={s.engine === "online" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={styles.optTitle}>Yapay zekâ çevirisi (isteğe bağlı, deneysel)</Text>
-            <Text style={styles.meta}>Manuel çeviri testi için kullanılır. İnternet ve yapılandırılmış API gerekir.</Text>
-            <StatusBadge kind="idle" label="Deneysel" />
-          </View>
-        </Pressable>
-        {s.engine === "online" ? (
-          <View style={{ gap: space.sm }}>
-            <Text style={styles.label}>Çevrimiçi çeviri kalitesi</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-              <Chip testID="quality-best" label="Kaliteli (~1 sn)" selected={s.translateQuality === "best"} onPress={() => update({ translateQuality: "best" })} />
-              <Chip testID="quality-fast" label="Hızlı (~0,5 sn)" selected={s.translateQuality === "fast"} onPress={() => update({ translateQuality: "fast" })} />
-            </ScrollView>
-          </View>
-        ) : null}
-        <Pressable testID="engine-offline-option" onPress={() => update({ engine: "offline" })} style={[styles.option, s.engine === "offline" && styles.optionOn]}>
-          <Ionicons name={s.engine === "offline" ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={styles.optTitle}>Cihaz içi çevrimdışı (ML Kit, ücretsiz)</Text>
-            <Text style={styles.meta}>PS5 çevirisi bu motorla çalışır. İlk kullanımda dil modeli indirilir, ardından yerel ağ yeterlidir.</Text>
-            <StatusBadge kind={hasNative("translateOffline") ? "ready" : "native"} label={hasNative("translateOffline") ? "Android" : "Android APK gerekir"} />
-          </View>
-        </Pressable>
-        <Field
-          testID="glossary-input"
-          label="Çevrilmeyecek isimler / terimler"
-          hint="Virgülle ayırın. Örn: Kratos, Atreus, Midgard"
-          value={glossary}
-          onChangeText={setGlossary}
-          onEndEditing={() => update({ glossary: glossary.split(",").map((g) => g.trim()).filter(Boolean) })}
-          onBlur={() => update({ glossary: glossary.split(",").map((g) => g.trim()).filter(Boolean) })}
-        />
+        {ENGINES.map(({ id, label, detail }) => (
+          <Pressable key={id} testID={`engine-${id}-option`} onPress={() => update({ engine: id })}
+            accessibilityRole="radio" accessibilityState={{ checked: s.engine === id }}
+            style={[styles.option, s.engine === id && styles.optionOn]}>
+            <Ionicons name={s.engine === id ? "radio-button-on" : "radio-button-off"} size={20} color={colors.brandPrimary} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.optTitle}>{label}</Text>
+              <Text style={styles.meta}>{detail}</Text>
+            </View>
+          </Pressable>
+        ))}
       </Card>
+      <SectionTitle title="Dil paketleri" />
+      <LanguageModelsCard source={s.sourceLang} />
+      <SectionTitle title="Oyun sözlüğü" />
+      {ready ? <GameGlossaryEditor key={JSON.stringify(s.glossary)} entries={s.glossary} onSave={(glossary) => update({ glossary })} /> : null}
     </View>
   );
 
   const right = (
     <View style={wide ? { flex: 1 } : undefined}>
-      <SectionTitle title="OCR ve altyazı algılama" subtitle="Değişiklikler sonraki Remote Play oturumunda uygulanır" />
+      <SectionTitle title="OCR ve altyazı algılama" />
       <Card>
         <Pressable testID="open-ocr-region-button" onPress={() => router.push("/ocr-region")}>
-          <RegionPreview region={s.ocrRegion} />
+          <RegionPreview region={s.ocrRegion} exclusions={s.exclusions} />
           <Text style={[styles.meta, { marginTop: space.sm }]}>
             Altyazı alanı: üstten %{Math.round(s.ocrRegion.y * 100)}, yükseklik %{Math.round(s.ocrRegion.h * 100)} · düzenlemek için dokunun
           </Text>
@@ -111,6 +106,10 @@ export default function SettingsScreen() {
           onDec={() => update({ sensitivity: clamp(Math.round((s.sensitivity - 0.1) * 10) / 10, 0, 1) })} onInc={() => update({ sensitivity: clamp(Math.round((s.sensitivity + 0.1) * 10) / 10, 0, 1) })} />
         <Stepper testID="repeat-window" label="Manuel testte tekrar engelleme" display={`${(s.repeatWindowMs / 1000).toFixed(1)} sn`}
           onDec={() => update({ repeatWindowMs: clamp(s.repeatWindowMs - 500, 500, 30000) })} onInc={() => update({ repeatWindowMs: clamp(s.repeatWindowMs + 500, 500, 30000) })} />
+        <Stepper testID="ocr-confirmations" label="Altyazı kararlılığı" display={`${s.confirmations} gözlem`}
+          onDec={() => update({ confirmations: clamp(s.confirmations - 1, 1, 4) })} onInc={() => update({ confirmations: clamp(s.confirmations + 1, 1, 4) })} />
+        <Stepper testID="subtitle-minimum-time" label="En kısa görünme süresi" display={`${s.minimumVisibleMs} ms`}
+          onDec={() => update({ minimumVisibleMs: clamp(s.minimumVisibleMs - 100, 0, 3000) })} onInc={() => update({ minimumVisibleMs: clamp(s.minimumVisibleMs + 100, 0, 3000) })} />
         <Stepper testID="clear-delay" label="Altyazı temizleme gecikmesi" display={`${(s.clearDelayMs / 1000).toFixed(1)} sn`}
           onDec={() => update({ clearDelayMs: clamp(s.clearDelayMs - 200, 500, 10000) })} onInc={() => update({ clearDelayMs: clamp(s.clearDelayMs + 200, 500, 10000) })} />
       </Card>
@@ -135,7 +134,7 @@ export default function SettingsScreen() {
         </View>
         <Button testID="open-app-settings-button" label="Uygulama ayarlarını aç" icon="open-outline" variant="secondary" onPress={() => Linking.openSettings()} />
         <Button testID="reset-settings-button" label="Varsayılanlara dön" icon="refresh-outline" variant="ghost"
-          onPress={() => { update({ ...DEFAULT_SETTINGS, consoles: s.consoles, tvIp: s.tvIp }); setGlossary(""); }} />
+          onPress={() => update({ ...DEFAULT_SETTINGS, consoles: s.consoles, selectedConsoleId: s.selectedConsoleId, tvIp: s.tvIp })} />
       </Card>
     </View>
   );
@@ -164,6 +163,7 @@ const useStyles = makeStyles((c) => ({
   root: { flex: 1, backgroundColor: c.surface },
   content: { paddingHorizontal: space.lg, maxWidth: 1300, width: "100%", alignSelf: "center" },
   label: { fontFamily: fonts.textMedium, fontSize: 12, color: c.muted, textTransform: "uppercase", letterSpacing: 0.6 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   chips: { gap: space.sm, alignItems: "center", height: 56 },
   option: { flexDirection: "row", gap: space.md, padding: space.md, borderRadius: 12, borderWidth: 1, borderColor: c.border },
   optionOn: { borderColor: c.brandPrimary, backgroundColor: c.surfaceTertiary },

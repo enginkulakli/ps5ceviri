@@ -5,12 +5,19 @@ import { storage } from "@/src/utils/storage";
 
 export type Console = { id: string; name: string; host: string; registered: boolean };
 
+export type TranslationMode = "subtitle" | "fullscreen";
+export type TranslationEngine = "offline" | "google_cloud" | "ai";
+export type GlossaryEntry = { source: string; target: string };
+
 export type Settings = {
   sourceLang: string;
   targetLang: string;
-  engine: "online" | "offline";
-  translateQuality: "fast" | "best";
+  engine: TranslationEngine;
+  mode: TranslationMode;
   ocrRegion: OcrRegion;
+  exclusions: OcrRegion[];
+  confirmations: number;
+  minimumVisibleMs: number;
   ocrIntervalMs: number;
   sensitivity: number;
   repeatWindowMs: number;
@@ -18,7 +25,7 @@ export type Settings = {
   autoConnect: boolean;
   foregroundService: boolean;
   keepWifiAwake: boolean;
-  glossary: string[];
+  glossary: GlossaryEntry[];
   tvPort: number;
   tvIp: string;
   consoles: Console[];
@@ -29,8 +36,11 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceLang: "en",
   targetLang: "tr",
   engine: "offline",
-  translateQuality: "best",
+  mode: "subtitle",
   ocrRegion: { x: 0, y: 0.72, w: 1, h: 0.28 },
+  exclusions: [],
+  confirmations: 2,
+  minimumVisibleMs: 700,
   ocrIntervalMs: 300,
   sensitivity: 0.5,
   repeatWindowMs: 4000,
@@ -63,7 +73,15 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           const saved = JSON.parse(raw);
           const migratedDelay = saved.selectedConsoleId === undefined && saved.clearDelayMs === 1200
             ? DEFAULT_SETTINGS.clearDelayMs : saved.clearDelayMs ?? DEFAULT_SETTINGS.clearDelayMs;
-          setSettings({ ...DEFAULT_SETTINGS, ...saved, clearDelayMs: migratedDelay });
+          const glossary = Array.isArray(saved.glossary)
+            ? saved.glossary.flatMap((entry: unknown): GlossaryEntry[] => {
+              if (typeof entry === "string" && entry.trim()) return [{ source: entry.trim(), target: entry.trim() }];
+              const term = entry as Partial<GlossaryEntry> | null;
+              return typeof term?.source === "string" && typeof term?.target === "string"
+                ? [{ source: term.source, target: term.target }] : [];
+            }).slice(0, 80) : [];
+          const engine = saved.engine === "google_cloud" || saved.engine === "ai" ? saved.engine : "offline";
+          setSettings({ ...DEFAULT_SETTINGS, ...saved, engine, glossary, clearDelayMs: migratedDelay });
         } catch {}
       }
       setReady(true);
