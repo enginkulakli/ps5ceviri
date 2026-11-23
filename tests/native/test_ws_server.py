@@ -64,7 +64,7 @@ async def main():
     check("server starts on 0.0.0.0:8787", h.cmd(f"START {PORT} -") == "START OK")
     check("send with no TV", h.cmd("SEND Merhaba") == "SEND NO_CLIENTS 0")
 
-    ws = await websockets.connect(URL)
+    ws = await websockets.connect(URL, proxy=None)
     replay = await recv(ws)
     check("TV connecting later gets current subtitle replayed", json.loads(replay)["text"] == "Merhaba" and 0 < json.loads(replay)["ttlMs"] <= 2000, replay)
     await asyncio.sleep(0.2)
@@ -93,7 +93,7 @@ async def main():
     check("messages arrive in order (newest last)", got == [f"satır {i}" for i in range(5)], str(got))
 
     # second device (different source IP: loopback) + disconnect/reconnect
-    other = await websockets.connect(f"ws://127.0.0.1:{PORT}")
+    other = await websockets.connect(f"ws://127.0.0.1:{PORT}", proxy=None)
     await recv(other)  # replay
     await asyncio.sleep(0.2)
     check("two devices counted", "clients=2" in h.cmd("STATE"))
@@ -104,7 +104,7 @@ async def main():
     await asyncio.sleep(0.3)
     check("disconnect detected", "clients=1" in h.cmd("STATE"))
     # TV reconnects from same IP while its old socket is still open (stale) -> replaced
-    ws2 = await websockets.connect(URL)
+    ws2 = await websockets.connect(URL, proxy=None)
     rep = await recv(ws2)
     check("reconnect gets latest subtitle", json.loads(rep)["text"] == "iki cihaz", rep)
     await asyncio.sleep(0.3)
@@ -123,7 +123,7 @@ async def main():
     # allow-list
     h.cmd("ALLOW 192.0.2.99")
     try:
-        bad = await websockets.connect(URL)
+        bad = await websockets.connect(URL, proxy=None)
         await asyncio.wait_for(bad.recv(), 2)
         rejected = False
     except Exception:
@@ -131,19 +131,19 @@ async def main():
     await asyncio.sleep(0.2)
     check("non-allowed IP rejected", rejected and "rejected=1" in h.cmd("STATE"))
     h.cmd(f"ALLOW {IP}")
-    ok_ws = await websockets.connect(URL)
+    ok_ws = await websockets.connect(URL, proxy=None)
     await recv(ok_ws)
     check("allowed TV IP accepted", True)
     await ok_ws.close()
     h.cmd("ALLOW -")
-    ws = await websockets.connect(URL)
+    ws = await websockets.connect(URL, proxy=None)
     await recv(ws)
 
     # restart on same port (SO_REUSEADDR)
     check("stop", h.cmd("STOP") == "STOPPED")
     check("send when stopped", h.cmd("SEND x") == "SEND NOT_RUNNING 0")
     check("immediate restart on same port", h.cmd(f"START {PORT} -") == "START OK")
-    ws = await websockets.connect(URL)
+    ws = await websockets.connect(URL, proxy=None)
     check("server restart has no stale replay", await no_msg(ws))
 
     # port conflict reported
@@ -154,7 +154,7 @@ async def main():
     check("port-in-use error reported clearly", r.startswith("START Port 8799 açılamadı"), r)
     blocker.close()
     h.cmd(f"START {PORT} -")
-    ws = await websockets.connect(URL)
+    ws = await websockets.connect(URL, proxy=None)
     await ws.send('{"type":"hello","subtitleVersion":2}')
     await asyncio.sleep(0.1)
     h.cmd("TTL 800 Zamanlı")
@@ -165,7 +165,7 @@ async def main():
     check("refresh supersedes the original timer", await no_msg(ws, 0.5))
     check("expiry clears the subtitle", json.loads(await recv(ws)) == {"text": ""})
     await ws.close()
-    ws = await websockets.connect(URL)
+    ws = await websockets.connect(URL, proxy=None)
     check("expired subtitles are not replayed", await no_msg(ws))
 
     # stability: 90 s, 1 msg / 50 ms with an idle client relying on ping/pong

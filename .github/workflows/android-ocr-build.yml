@@ -28,9 +28,22 @@ jobs:
           java-version: '21'
       - name: Install Android SDK and native build dependencies
         run: |
-          sdkmanager --install 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
-          sudo apt-get update -qq
-          sudo apt-get install -y protobuf-compiler python3-protobuf
+          sdk="${ANDROID_HOME:-$RUNNER_TEMP/android-sdk}"
+          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            mkdir -p "$sdk/cmdline-tools"
+            curl -fsSL --retry 3 https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip -o "$RUNNER_TEMP/android-commandline.zip"
+            unzip -q "$RUNNER_TEMP/android-commandline.zip" -d "$sdk/cmdline-tools"
+            mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+          fi
+          (set +o pipefail; yes | "$sdkmanager" --sdk_root="$sdk" --licenses)
+          "$sdkmanager" --sdk_root="$sdk" --channel=3 --install \
+            'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          python3 -m venv "$RUNNER_TEMP/ps5-protobuf"
+          "$RUNNER_TEMP/ps5-protobuf/bin/pip" install grpcio-tools==1.85.3
+          ln -s python-grpc-tools-protoc "$RUNNER_TEMP/ps5-protobuf/bin/protoc"
+          echo "$RUNNER_TEMP/ps5-protobuf/bin" >> "$GITHUB_PATH"
           if grep -q 'third_party/chiaki-ng' .gitmodules 2>/dev/null; then
             git submodule update --init --depth 1 third_party/chiaki-ng
             git -C third_party/chiaki-ng submodule update --init --depth 1 \
