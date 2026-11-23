@@ -28,8 +28,7 @@ internal class RemoteVideoDecoder {
 
   /** The input ByteBuffer is valid only during this call. */
   fun queue(sample: ByteBuffer): Boolean {
-    val type = firstNalType(sample)
-    if (type == 7 || type == 8) {
+    if (isCodecConfig(sample)) {
       if (sample.remaining() > 64 * 1024) return false
       parameterSets = ByteArray(sample.remaining()).also(sample::get)
       return true
@@ -41,13 +40,19 @@ internal class RemoteVideoDecoder {
     return queueInput(sample, 0)
   }
 
-  private fun firstNalType(sample: ByteBuffer): Int {
-    val offset = sample.position()
-    if (sample.remaining() < 4 || sample.get(offset).toInt() != 0 || sample.get(offset + 1).toInt() != 0) return -1
-    val prefix = if (sample.get(offset + 2).toInt() == 1) 3
-      else if (sample.remaining() >= 5 && sample.get(offset + 2).toInt() == 0 &&
-        sample.get(offset + 3).toInt() == 1) 4 else return -1
-    return sample.get(offset + prefix).toInt() and 0x1f
+  private fun isCodecConfig(sample: ByteBuffer): Boolean {
+    var offset = sample.position()
+    var hasParameterSet = false
+    while (offset + 3 < sample.limit()) {
+      if (sample.get(offset).toInt() == 0 && sample.get(offset + 1).toInt() == 0 &&
+        sample.get(offset + 2).toInt() == 1) {
+        val type = sample.get(offset + 3).toInt() and 0x1f
+        if (type in 1..5) return false // This access unit also contains a picture.
+        if (type == 7 || type == 8) hasParameterSet = true
+        offset += 4
+      } else offset++
+    }
+    return hasParameterSet
   }
 
   private fun queueInput(sample: ByteBuffer, flags: Int): Boolean {
@@ -72,7 +77,9 @@ internal class RemoteVideoDecoder {
       if (index < 0) return@repeat
       try {
         if (outputInfo.size > 0 && outputInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-          val image = if (needImage()) codec.getOutputImage(index) else null
+          val image = if (needImage()) {
+            checkNotNull(codec.getOutputImage(index)) { "H.264 çözücüsü okunabilir YUV karesi vermedi." }
+          } else null
           image.use { onFrame(it) }
         }
       } finally {

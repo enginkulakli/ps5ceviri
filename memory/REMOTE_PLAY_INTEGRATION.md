@@ -22,7 +22,7 @@ PS5’te yerel DualSense ile oynamaya devam etmek için, gerekirse Remote Play o
 
 ## Android ARM64 derlemesi
 
-Node.js 22+, Yarn Classic, JDK 21, Python 3 ve Protobuf derleyicisi gerekir. Android SDK’ya `platforms;android-37.0`, `build-tools;37.0.0`, `ndk;28.2.13676358` ve `cmake;3.22.1` kur. Python ortamına `protobuf` yükle ve `protoc` komutunu PATH’e ekle.
+Node.js 22+, Yarn Classic, JDK 21, Python 3 ve Protobuf derleyicisi gerekir. Android SDK’ya `platforms;android-37.0`, `build-tools;37.0.0`, `build-tools;36.0.0`, `ndk;28.2.13676358` ve `cmake;3.22.1` kur. Python ortamına `protobuf` yükle ve `protoc` komutunu PATH’e ekle.
 
 ```sh
 git submodule update --init third_party/chiaki-ng
@@ -32,7 +32,7 @@ cd frontend
 yarn install --frozen-lockfile
 CI=1 yarn expo prebuild --platform android
 cd android
-./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a \
+./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a \
   -Pandroid.enableMinifyInReleaseBuilds=false
 ```
 

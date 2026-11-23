@@ -54,7 +54,11 @@ class SubtitleServerCore(
   private val version2Clients = HashSet<WebSocket>()
   private val timer = ScheduledThreadPoolExecutor(1) { runnable ->
     Thread(runnable, "subtitle-expiry").apply { isDaemon = true }
-  }.apply { removeOnCancelPolicy = true }
+  }.apply {
+    removeOnCancelPolicy = true
+    setKeepAliveTime(30, TimeUnit.SECONDS)
+    allowCoreThreadTimeOut(true)
+  }
   private var expiry: ScheduledFuture<*>? = null
   private var expiresAt = 0L
   private var lastSentText: String? = null

@@ -30,7 +30,7 @@ export default function ConnectScreen() {
   const { settings, ready, update } = useSettings();
   const { status } = useRemotePlay();
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
   const automaticDiscovery = useRef(false);
 
   const [tabletIp, setTabletIp] = useState<string | null>(null);
@@ -46,15 +46,11 @@ export default function ConnectScreen() {
   const [psMsg, setPsMsg] = useState<Msg>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const loadNetwork = async () => {
-    try {
-      const [ip, st] = await Promise.all([Network.getIpAddressAsync(), Network.getNetworkStateAsync()]);
+  const loadNetwork = () => Promise.all([Network.getIpAddressAsync(), Network.getNetworkStateAsync()])
+    .then(([ip, state]) => {
       setTabletIp(ip && ip !== "0.0.0.0" ? ip : null);
-      setWifi(st.type === Network.NetworkStateType.WIFI ? "Wi-Fi" : String(st.type ?? "Bilinmiyor"));
-    } catch {
-      setTabletIp(null);
-    }
-  };
+      setWifi(state.type === Network.NetworkStateType.WIFI ? "Wi-Fi" : String(state.type ?? "Bilinmiyor"));
+    }).catch(() => setTabletIp(null));
 
   useEffect(() => {
     loadNetwork();

@@ -39,7 +39,7 @@ class RemotePlayService : Service() {
   private var nativeHandle = 0L
   private var attemptNumber = 0
   private var streamToken = 0L
-  private var lastFrameAt = 0L
+  private var streamingSince = 0L
   private var deadline = 0L
   private var startRequestId = 0
   private var wakeLock: PowerManager.WakeLock? = null
@@ -153,17 +153,19 @@ class RemotePlayService : Service() {
     try {
       decoder.drain({ pipeline?.needsFrame(SystemClock.elapsedRealtime()) == true }) { image ->
         val now = SystemClock.elapsedRealtime()
-        if (lastFrameAt == 0L) update { it.copy(video = "H.264 720p akışı alınıyor") }
-        lastFrameAt = now
+        if (streamingSince == 0L) {
+          streamingSince = now
+          update { it.copy(video = "H.264 720p akışı alınıyor") }
+        }
+        if (now - streamingSince >= 15000) attemptNumber = 0
         deadline = now + 8000
         if (image != null) {
-          attemptNumber = 0
           val config = options ?: return@drain
           pipeline?.process(config.region.crop(image))
         }
       }
       if (SystemClock.elapsedRealtime() >= deadline) {
-        retry(if (lastFrameAt == 0L) "PS5 görüntüsü alınamadı" else "PS5 görüntü akışı durdu")
+        retry(if (streamingSince == 0L) "PS5 görüntüsü alınamadı" else "PS5 görüntü akışı durdu")
       } else handler.postDelayed(drain, 16)
     } catch (e: Exception) {
       finish("Video karesi işlenemedi: ${e.message}")
@@ -189,7 +191,7 @@ class RemotePlayService : Service() {
     }
     decoder?.close()
     decoder = null
-    lastFrameAt = 0
+    streamingSince = 0
   }
 
   private fun finish(error: String) {

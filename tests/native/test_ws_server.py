@@ -14,7 +14,6 @@ import websockets
 
 JARS = "/opt/jars/Java-WebSocket-1.6.0.jar:/opt/jars/slf4j-api-2.0.13.jar"
 CP = os.environ.get("PS5_WS_TEST_CLASSPATH", f"/tmp/ktbuild/harness.jar:{JARS}:/opt/kt/kotlinc/lib/kotlin-stdlib.jar")
-PORT = 8787
 results = []
 
 
@@ -28,6 +27,9 @@ def lan_ip():
 
 
 IP = lan_ip()
+with socket.socket() as probe:
+    probe.bind(("0.0.0.0", 0))
+    PORT = probe.getsockname()[1]
 URL = f"ws://{IP}:{PORT}"
 
 
@@ -61,7 +63,9 @@ async def no_msg(ws, timeout=0.6):
 
 async def main():
     h = Harness()
-    check("server starts on 0.0.0.0:8787", h.cmd(f"START {PORT} -") == "START OK")
+    start = h.cmd(f"START {PORT} -")
+    check("server starts on the LAN port", start == "START OK", start)
+    assert start == "START OK"
     check("send with no TV", h.cmd("SEND Merhaba") == "SEND NO_CLIENTS 0")
 
     ws = await websockets.connect(URL, proxy=None)
@@ -148,10 +152,11 @@ async def main():
 
     # port conflict reported
     blocker = socket.socket()
-    blocker.bind(("0.0.0.0", 8799))
+    blocker.bind(("0.0.0.0", 0))
     blocker.listen()
-    r = h.cmd("START 8799 -")
-    check("port-in-use error reported clearly", r.startswith("START Port 8799 açılamadı"), r)
+    busy_port = blocker.getsockname()[1]
+    r = h.cmd(f"START {busy_port} -")
+    check("port-in-use error reported clearly", r.startswith(f"START Port {busy_port} açılamadı"), r)
     blocker.close()
     h.cmd(f"START {PORT} -")
     ws = await websockets.connect(URL, proxy=None)
