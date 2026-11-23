@@ -53,6 +53,7 @@ class RemotePlayService : Service() {
     super.onCreate()
     worker = HandlerThread("ps5-remote-play").apply { start() }
     handler = Handler(worker.looper)
+    instance = this
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -77,21 +78,14 @@ class RemotePlayService : Service() {
     val host = intent.getStringExtra("host") ?: return
     if (options?.host == host) return
     stopWork()
-    val config = RemotePlayOptions(
-      host,
-      SubtitleRegion(intent.getDoubleExtra("x", 0.0), intent.getDoubleExtra("y", 0.72),
-        intent.getDoubleExtra("w", 1.0), intent.getDoubleExtra("h", 0.28)),
-      intent.getLongExtra("interval", 300),
-      intent.getLongExtra("ttl", 2000),
-      intent.getDoubleExtra("sensitivity", 0.5),
-      intent.getBooleanExtra("wifi", true),
-    )
+    val config = RemotePlayOptions(host, intent.getBooleanExtra("wifi", true),
+      TranslationOptions.parse(intent.getStringExtra("translation") ?: "{}"))
     status = RemotePlayStatus(active = true, host = host, console = "PS5'e bağlanılıyor")
     options = config
     attemptNumber = 0
     try {
       acquireLocks(config.keepWifiAwake)
-      pipeline = RemoteSubtitlePipeline(handler, config, ::update).also { it.prepare() }
+      pipeline = RemoteSubtitlePipeline(handler, config.translation, ::update).also { it.prepare() }
       connect()
     } catch (e: Exception) {
       finish(e.message ?: "Çeviri başlatılamadı")
@@ -159,10 +153,7 @@ class RemotePlayService : Service() {
         }
         if (now - streamingSince >= 15000) attemptNumber = 0
         deadline = now + 8000
-        if (image != null) {
-          val config = options ?: return@drain
-          pipeline?.process(config.region.crop(image))
-        }
+        if (image != null) pipeline?.process(image)
       }
       if (SystemClock.elapsedRealtime() >= deadline) {
         retry(if (streamingSince == 0L) "PS5 görüntüsü alınamadı" else "PS5 görüntü akışı durdu")
@@ -173,8 +164,8 @@ class RemotePlayService : Service() {
   }
 
   private fun retry(reason: String) {
-    closeStream()
     pipeline?.resetStream()
+    closeStream()
     if (attemptNumber >= 5) return finish(reason)
     val delay = 1000L shl attemptNumber++
     update { it.copy(console = "Bağlantı kesildi", session = "${delay / 1000} sn sonra yeniden bağlanıyor",
@@ -245,6 +236,7 @@ class RemotePlayService : Service() {
   }
 
   override fun onDestroy() {
+    if (instance === this) instance = null
     handler.post {
       if (options != null) stopWork()
       worker.quitSafely()
@@ -256,16 +248,26 @@ class RemotePlayService : Service() {
     private const val ACTION_START = "ps5.remoteplay.START"
     private const val ACTION_STOP = "ps5.remoteplay.STOP"
 
+    @Volatile private var instance: RemotePlayService? = null
+
     @Volatile internal var status = RemotePlayStatus()
       private set
 
-    internal fun start(context: Context, config: RemotePlayOptions) {
+    internal fun start(context: Context, host: String, keepWifiAwake: Boolean, rawOptions: String) {
+      TranslationOptions.parse(rawOptions)
       val intent = Intent(context, RemotePlayService::class.java).setAction(ACTION_START)
-        .putExtra("host", config.host).putExtra("x", config.region.x).putExtra("y", config.region.y)
-        .putExtra("w", config.region.width).putExtra("h", config.region.height)
-        .putExtra("interval", config.intervalMs).putExtra("ttl", config.clearDelayMs)
-        .putExtra("sensitivity", config.sensitivity).putExtra("wifi", config.keepWifiAwake)
+        .putExtra("host", host).putExtra("wifi", keepWifiAwake).putExtra("translation", rawOptions)
       if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
+    }
+
+    internal fun configure(options: TranslationOptions) {
+      val service = instance ?: return
+      service.handler.post { service.pipeline?.configure(options) }
+    }
+
+    internal fun refreshModels() {
+      val service = instance ?: return
+      service.handler.post { service.pipeline?.prepare() }
     }
 
     internal fun stop(context: Context) {

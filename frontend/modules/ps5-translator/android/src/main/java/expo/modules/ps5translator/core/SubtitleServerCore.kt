@@ -52,6 +52,9 @@ class SubtitleServerCore(
   @Volatile private var allowedIp: String? = null
   private val clients = LinkedHashMap<WebSocket, ClientInfo>()
   private val version2Clients = HashSet<WebSocket>()
+  private val overlayClients = HashSet<WebSocket>()
+  private var overlay: OverlayMessage? = null
+  private var overlaySentAt = 0L
   private val timer = ScheduledThreadPoolExecutor(1) { runnable ->
     Thread(runnable, "subtitle-expiry").apply { isDaemon = true }
   }.apply {
@@ -136,6 +139,7 @@ class SubtitleServerCore(
       expiry = null
       expiresAt = 0L
       lastSentText = null
+      overlay = null
       running = false
       server = null
       current
@@ -147,6 +151,7 @@ class SubtitleServerCore(
       running = false
       clients.clear()
       version2Clients.clear()
+      overlayClients.clear()
     }
     emit()
   }
@@ -154,6 +159,8 @@ class SubtitleServerCore(
   fun isRunning() = synchronized(lock) { running }
 
   fun clientCount() = synchronized(lock) { clients.size }
+
+  internal fun overlayClientCount() = synchronized(lock) { overlayClients.size }
 
   fun send(text: String, force: Boolean = false, ttlMs: Long? = null): SendResult {
     val result = synchronized(lock) {
@@ -183,11 +190,24 @@ class SubtitleServerCore(
     if (cleared) emit()
   }
 
-  private fun remainingMs() = expiresAt - TimeUnit.NANOSECONDS.toMillis(System.nanoTime())
+  /** Snapshots go only to TVs that opted into the spatial overlay protocol. */
+  internal fun sendOverlay(message: OverlayMessage): Int = synchronized(lock) {
+    if (!running) return 0
+    val previous = overlay
+    overlay = message.takeIf { it.blocks.isNotEmpty() }
+    overlaySentAt = monotonicMs()
+    if (previous == null && overlay == null) return 0
+    val payload = message.encode()
+    overlayClients.count { it.isOpen && runCatching { it.send(payload) }.isSuccess }
+  }
+
+  private fun monotonicMs() = TimeUnit.NANOSECONDS.toMillis(System.nanoTime())
+
+  private fun remainingMs() = expiresAt - monotonicMs()
 
   private fun scheduleExpiryLocked(ttlMs: Long) {
     expiry?.cancel(false)
-    expiresAt = TimeUnit.NANOSECONDS.toMillis(System.nanoTime()) + ttlMs
+    expiresAt = monotonicMs() + ttlMs
     val deadline = expiresAt
     expiry = timer.schedule({
       val changed = synchronized(lock) {
@@ -256,7 +276,11 @@ class SubtitleServerCore(
           conn.close(1000, "server is stopping")
           return
         }
-        stale.forEach { clients.remove(it); version2Clients.remove(it) }
+        stale.forEach {
+          clients.remove(it)
+          version2Clients.remove(it)
+          overlayClients.remove(it)
+        }
         clients[conn] = ClientInfo(ip, clock())
         val replay = lastSentText
         val remaining = remainingMs()
@@ -271,14 +295,27 @@ class SubtitleServerCore(
     override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
       val removed = synchronized(lock) {
         version2Clients.remove(conn)
+        overlayClients.remove(conn)
         clients.remove(conn) != null
       }
       if (removed) emit()
     }
 
     override fun onMessage(conn: WebSocket, message: String) {
-      if (message == "{\"type\":\"hello\",\"subtitleVersion\":2}") {
-        synchronized(lock) { if (conn in clients) version2Clients.add(conn) }
+      if (message != "{\"type\":\"hello\",\"subtitleVersion\":2}" &&
+        message != "{\"type\":\"hello\",\"subtitleVersion\":3}") return
+      synchronized(lock) {
+        if (conn !in clients) return
+        version2Clients.add(conn)
+        if (message.endsWith(":3}") && overlayClients.add(conn)) {
+          val current = overlay ?: return
+          val elapsed = monotonicMs() - overlaySentAt
+          val active = current.blocks.mapNotNull { block ->
+            val remaining = block.ttlMs - elapsed
+            if (remaining > 0) block.copy(ttlMs = remaining) else null
+          }
+          if (active.isNotEmpty()) runCatching { conn.send(current.copy(blocks = active).encode()) }
+        }
       }
     }
 

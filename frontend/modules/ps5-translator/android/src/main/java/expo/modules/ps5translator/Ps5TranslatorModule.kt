@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -35,13 +36,7 @@ private const val STATE_EVENT = "onServerState"
 class ServerStartException(message: String) : CodedException("ERR_TV_SERVER_START", message, null)
 
 class RemotePlayArguments : Record {
-  @Field var x: Double = 0.0
-  @Field var y: Double = 0.72
-  @Field var w: Double = 1.0
-  @Field var h: Double = 0.28
-  @Field var intervalMs: Int = 300
-  @Field var ttlMs: Int = 2000
-  @Field var sensitivity: Double = 0.5
+  @Field var settingsJson: String = "{}"
   @Field var keepWifiAwake: Boolean = true
 }
 
@@ -149,16 +144,36 @@ class Ps5TranslatorModule : Module() {
 
     AsyncFunction("startSession") { host: String, args: RemotePlayArguments ->
       require(isConsoleIpv4(host)) { "Geçerli bir PS5 IPv4 adresi girin." }
-      require(args.x in 0.0..0.95 && args.y in 0.0..0.95 && args.w >= 0.05 && args.h >= 0.05 &&
-        args.x + args.w <= 1.00001 && args.y + args.h <= 1.00001 && args.sensitivity.isFinite()) {
-        "OCR ayarları geçersiz."
-      }
       val keys = ConsoleCredentials.read(context, host)
         ?: error("Seçilen PS5 için önce eşleştirme yapın.")
       keys.fill(0)
-      RemotePlayService.start(context, RemotePlayOptions(host, SubtitleRegion(args.x, args.y, args.w, args.h),
-        args.intervalMs.coerceIn(150, 2000).toLong(), args.ttlMs.coerceIn(500, 10000).toLong(),
-        args.sensitivity.coerceIn(0.0, 1.0), args.keepWifiAwake))
+      RemotePlayService.start(context, host, args.keepWifiAwake, args.settingsJson)
+    }
+
+    AsyncFunction("updateTranslation") { json: String -> RemotePlayService.configure(TranslationOptions.parse(json)) }
+
+    AsyncFunction("getLanguageModels") { promise: Promise ->
+      LanguageModels.downloaded().addOnCompleteListener { task ->
+        if (task.isSuccessful) promise.resolve(task.result.map { it.language }.sorted())
+        else promise.reject("ERR_ML_MODEL", "Dil paketleri okunamadı.", task.exception)
+      }
+    }
+
+    AsyncFunction("downloadLanguageModel") { language: String, promise: Promise ->
+      LanguageModels.download(language).addOnCompleteListener { task ->
+        if (task.isSuccessful) {
+          RemotePlayService.refreshModels()
+          promise.resolve()
+        } else promise.reject("ERR_ML_MODEL", "Dil paketi indirilemedi. İnternet bağlantısını kontrol edin.", task.exception)
+      }
+    }
+
+    AsyncFunction("removeLanguageModel") { language: String, promise: Promise ->
+      check(!RemotePlayService.status.active && !BackgroundTranslator.enabled) { "Dil paketini kaldırmadan önce çeviriyi durdurun." }
+      LanguageModels.remove(language).addOnCompleteListener { task ->
+        if (task.isSuccessful) promise.resolve()
+        else promise.reject("ERR_ML_MODEL", "Dil paketi kaldırılamadı.", task.exception)
+      }
     }
 
     AsyncFunction("translateOffline") { text: String, source: String, target: String ->
@@ -177,6 +192,7 @@ class Ps5TranslatorModule : Module() {
       val state = RemotePlayService.status
       Bundle().apply {
         putBoolean("active", state.active)
+        putInt("overlayClients", ServerController.core.overlayClientCount())
         putString("host", state.host)
         putString("console", state.console)
         putString("session", state.session)

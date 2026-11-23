@@ -7,6 +7,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.SystemClock
 import java.nio.ByteBuffer
+import expo.modules.ps5translator.core.FrameRect
 
 /** The transport thread feeds compressed samples. The service worker drains decoded frames. */
 internal class RemoteVideoDecoder {
@@ -93,7 +94,7 @@ internal class RemoteVideoDecoder {
 }
 
 internal data class SubtitleRegion(val x: Double, val y: Double, val width: Double, val height: Double) {
-  fun crop(image: Image): OcrFrame {
+  fun crop(image: Image, exclusions: List<FrameRect> = emptyList()): OcrFrame {
     check(image.format == ImageFormat.YUV_420_888) { "Video decoder did not return YUV_420_888" }
     val bounds = image.cropRect
     val left = ((bounds.width() * x).toInt() + bounds.left).coerceIn(bounds.left, bounds.right - 2)
@@ -114,6 +115,13 @@ internal data class SubtitleRegion(val x: Double, val y: Double, val width: Doub
       } else {
         for (column in 0 until w) bytes[row * w + column] = buffer.get(start + column * pixelStride)
       }
+    }
+    for (excluded in exclusions) {
+      val fromX = (bounds.left + (excluded.x * bounds.width()).toInt() - left).coerceIn(0, w)
+      val toX = (bounds.left + ((excluded.x + excluded.w) * bounds.width()).toInt() - left).coerceIn(0, w)
+      val fromY = (bounds.top + (excluded.y * bounds.height()).toInt() - top).coerceIn(0, h)
+      val toY = (bounds.top + ((excluded.y + excluded.h) * bounds.height()).toInt() - top).coerceIn(0, h)
+      for (row in fromY until toY) bytes.fill(16, row * w + fromX, row * w + toX)
     }
     bytes.fill(128.toByte(), w * h)
     return OcrFrame(bytes, w, h)
