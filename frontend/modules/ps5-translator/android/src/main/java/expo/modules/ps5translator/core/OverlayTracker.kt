@@ -3,7 +3,7 @@ package expo.modules.ps5translator.core
 internal data class DetectedText(val text: String, val rect: FrameRect)
 
 internal class OverlayTracker {
-  internal data class Item(val id: Long, val text: String, val rect: FrameRect, val seenAt: Long)
+  internal data class Item(val id: Long, val text: String, val rect: FrameRect, val seenAt: Long, val normalized: String)
   private var nextId = 0L
   private var latestObservation = 0L
   private val items = LinkedHashMap<Long, Item>()
@@ -13,20 +13,20 @@ internal class OverlayTracker {
     latestObservation = now
     val candidates = items.values.toMutableList()
     val incoming = blocks.sortedByDescending { it.text.length }.take(24)
-    for (block in incoming) {
-      val key = memoryText(block.text)
-      val exact = candidates.filter { memoryText(it.text) == key && it.rect.distance(block.rect) < .24 }
+      .map { it to memoryText(it.text) }
+    for ((block, key) in incoming) {
+      val exact = candidates.filter { it.normalized == key && it.rect.distance(block.rect) < .24 }
         .minByOrNull { it.rect.distance(block.rect) }
       val replaced = exact ?: candidates.filter {
         it.rect.overlap(block.rect) > .48 || (it.rect.distance(block.rect) < .04 && it.rect.containsCenter(block.rect))
       }.minByOrNull { it.rect.distance(block.rect) }
       if (replaced != null) candidates.remove(replaced)
       val id = replaced?.id ?: ++nextId
-      items[id] = Item(id, exact?.text ?: block.text, replaced?.rect?.follow(block.rect) ?: block.rect, now)
+      items[id] = Item(id, exact?.text ?: block.text, replaced?.rect?.follow(block.rect) ?: block.rect, now, key)
     }
     for (old in candidates) {
-      if (sceneChanged || incoming.any { it.rect.overlap(old.rect) > .45 ||
-          (memoryText(it.text) == memoryText(old.text) && it.rect.distance(old.rect) < .29) }) {
+      if (sceneChanged || incoming.any { (block, key) -> block.rect.overlap(old.rect) > .45 ||
+          (key == old.normalized && block.rect.distance(old.rect) < .29) }) {
         items.remove(old.id)
       }
     }

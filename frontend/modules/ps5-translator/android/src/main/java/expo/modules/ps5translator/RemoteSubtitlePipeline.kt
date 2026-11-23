@@ -236,7 +236,7 @@ internal class RemoteSubtitlePipeline(
       val active = overlay.alive(now, screenTtl)
       requestTranslations(active.filter(overlay::seenInLatestFrame).map { it.text }, now)
       val live = active.mapNotNull { item ->
-        val text = cache[memoryText(item.text)] ?: return@mapNotNull null
+        val text = cache[item.normalized] ?: return@mapNotNull null
         val wasVisible = previousOverlay.any { it.id == item.id && it.text == text }
         if (!wasVisible && !overlay.seenInLatestFrame(item)) return@mapNotNull null
         OverlayBox(item.id, text, item.rect, item.seenAt + screenTtl - now)
@@ -255,7 +255,7 @@ internal class RemoteSubtitlePipeline(
         if (clients > 0 && boxes.isNotEmpty()) {
           val fresh = boxes.filter { box -> previousOverlay.none { it.id == box.id && it.text == box.text } }.map { it.id }.toSet()
           active.filter { it.id in fresh }.forEach {
-            detectedAt[memoryText(it.text)]?.let { start -> TranslationMetrics.record("ocrToWebSocket", start) }
+            detectedAt[it.normalized]?.let { start -> TranslationMetrics.record("ocrToWebSocket", start) }
           }
           update { state -> state.copy(turkish = boxes.joinToString(" · ") { it.text }.take(420)) }
         }
@@ -307,7 +307,7 @@ internal class RemoteSubtitlePipeline(
 
   private fun requestTranslations(sources: List<String>, now: Long) {
     failed.entries.removeAll { now >= it.value }
-    val room = (if (fullScreen) 2 else 1) - inFlight.size
+    val room = 2 - inFlight.size
     if (room <= 0) return
     val started = System.nanoTime()
     val pending = sources.distinctBy(::memoryText).map { it to memoryText(it) }
@@ -329,7 +329,7 @@ internal class RemoteSubtitlePipeline(
           return
         }
         val stillVisible = if (fullScreen) overlay.alive(SystemClock.elapsedRealtime(), screenTtl)
-          .any { overlay.seenInLatestFrame(it) && memoryText(it.text) == normalized }
+          .any { overlay.seenInLatestFrame(it) && it.normalized == normalized }
           else memoryText(tracker.text) == normalized
         if (!modelReady || !stillVisible) {
           inFlight.remove(normalized)
@@ -362,20 +362,24 @@ internal class RemoteSubtitlePipeline(
 
   private fun translateLive(key: ArchiveKey, epoch: Long) {
     val started = System.nanoTime()
-    val stage = if (options.engine == EngineId.OFFLINE) "mlkit" else "googleCloud"
+    val isCloud = options.engine == EngineId.GOOGLE_CLOUD
+    val stage = if (isCloud) "googleCloud" else "mlkit"
+    val revision = archiveRevision
     update { it.copy(translation = "Çevriliyor") }
     provider.translate(TranslationRequest(key.source, glossary)).addOnCompleteListener(callbackExecutor) { task ->
       TranslationMetrics.record(stage, started)
       if (closed || epoch != translationEpoch) return@addOnCompleteListener
       inFlight.remove(key.normalized)
       val text = if (task.isSuccessful) task.result.trim().take(1200) else ""
-      if (text.isBlank()) failed[key.normalized] = SystemClock.elapsedRealtime() + 3000
+      if (text.isBlank()) failed[key.normalized] = SystemClock.elapsedRealtime() + if (isCloud) 30000 else 3000
       else cache[key.normalized] = text
       update { it.copy(translation = if (inFlight.isNotEmpty()) "Çevriliyor" else if (text.isNotEmpty()) engineReady()
         else if (options.engine == EngineId.GOOGLE_CLOUD) task.exception?.message?.take(180) ?: "Google Cloud çevirisi tamamlanamadı."
         else "Çeviri tamamlanamadı") }
       reconcile()
-      if (text.isNotEmpty()) archive.writes.execute { runCatching { archive.store(key, text) } }
+      if (text.isNotEmpty()) archive.writes.execute {
+        if (archive.revision.get() == revision) runCatching { archive.store(key, text) }
+      }
     }
   }
 

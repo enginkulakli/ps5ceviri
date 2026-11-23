@@ -18,7 +18,7 @@ internal object SmartOcr {
     val normalized = lines.take(160).mapNotNull(::cleanLine).sortedBy { it.rect.y }
     val distinct = mutableListOf<OcrLine>()
     for (line in normalized) {
-      if (distinct.none { memoryText(it.text) == memoryText(line.text) && it.rect.overlap(line.rect) > .55 }) {
+      if (distinct.none { it.text == line.text && it.rect.overlap(line.rect) > .55 }) {
         distinct.add(line)
       }
     }
