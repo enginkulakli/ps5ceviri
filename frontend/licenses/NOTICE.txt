@@ -1,0 +1,9 @@
+PS5 Çevirmen for Android
+Corresponding source and build instructions:
+https://github.com/enginkulakli/ps5ceviri/tree/feature/ps5-remote-play-subtitles
+
+This build incorporates chiaki-ng at 43728af2e639fecb8a7af1cd68c29820a40de973.
+The pinned upstream source, upstream licence and OpenSSL linking exception
+are available through the chiaki-ng Git submodule. Other native dependencies
+are included with the individual notices in this directory. Google ML Kit
+is used under the Google ML Kit terms.

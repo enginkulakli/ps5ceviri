@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.22)
+project(Ps5RemotePlay LANGUAGES C CXX)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CHIAKI "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../../third_party/chiaki-ng")
+if(NOT EXISTS "${CHIAKI}/third-party/nanopb/CMakeLists.txt")
+    message(FATAL_ERROR "Initialize chiaki-ng and its build dependencies as described in the README.")
+endif()
+
+# Build the upstream transport library without its desktop GUI or Android UI.
+set(CHIAKI_ENABLE_ANDROID ON)
+set(CHIAKI_ENABLE_STEAM_SHORTCUT OFF)
+set(CHIAKI_LIB_ENABLE_OPUS OFF)
+set(CHIAKI_ENABLE_FFMPEG_DECODER OFF)
+set(CHIAKI_ENABLE_PI_DECODER OFF)
+set(CHIAKI_LIB_JSONC_EXTERNAL_PROJECT ON)
+set(CHIAKI_LIB_MINIUPNPC_EXTERNAL_PROJECT ON)
+find_package(PythonInterp 3 REQUIRED)
+include(OpenSSL.cmake)
+add_subdirectory("${CHIAKI}/third-party" chiaki-third-party)
+include("${CHIAKI}/cmake/JsoncExternalProject.cmake")
+include("${CHIAKI}/cmake/MiniupnpcExternalProject.cmake")
+add_subdirectory("${CHIAKI}/lib" chiaki-lib)
+
+add_library(ps5-remote-play SHARED remote_play.c)
+target_compile_options(ps5-remote-play PRIVATE -Wall -Wextra)
+target_link_options(ps5-remote-play PRIVATE "-Wl,--exclude-libs,ALL")
+target_link_libraries(ps5-remote-play PRIVATE chiaki-lib)

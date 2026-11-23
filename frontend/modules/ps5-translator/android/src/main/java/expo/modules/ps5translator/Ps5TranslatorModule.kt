@@ -8,6 +8,8 @@ import android.os.Bundle
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.NetworkInterface
+import android.os.SystemClock
 import java.net.SocketTimeoutException
 import android.os.Handler
 import android.os.Looper
@@ -17,12 +19,31 @@ import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.TranslatorOptions
+import java.util.concurrent.TimeUnit
 import expo.modules.ps5translator.core.SendStatus
 import expo.modules.ps5translator.core.ServerSnapshot
 
 private const val STATE_EVENT = "onServerState"
 
 class ServerStartException(message: String) : CodedException("ERR_TV_SERVER_START", message, null)
+
+class RemotePlayArguments : Record {
+  @Field var x: Double = 0.0
+  @Field var y: Double = 0.72
+  @Field var w: Double = 1.0
+  @Field var h: Double = 0.28
+  @Field var intervalMs: Int = 300
+  @Field var ttlMs: Int = 2000
+  @Field var sensitivity: Double = 0.5
+  @Field var keepWifiAwake: Boolean = true
+}
 
 class Ps5TranslatorModule : Module() {
   private val context: Context
@@ -111,45 +132,104 @@ class Ps5TranslatorModule : Module() {
       ScreenTextRecognizer.recognize(base64Frame)
     }
 
-    // Real LAN discovery (PS4/PS5 Remote Play discovery protocol, UDP 9302).
-    // Discovery only: pairing and video streaming require a separate native Chiaki engine.
+    AsyncFunction("registerConsole") { host: String, account: String, pin: String ->
+      ConsoleCredentials.register(context, host.trim(), account, pin.trim())
+    }
+
+    AsyncFunction("isConsoleRegistered") { host: String ->
+      val keys = runCatching { ConsoleCredentials.read(context, host.trim()) }.getOrNull()
+      keys?.fill(0)
+      keys != null
+    }
+
+    AsyncFunction("forgetConsole") { host: String ->
+      require(RemotePlayService.status.host != host) { "PS5 kaydını silmeden önce çeviriyi durdurun." }
+      ConsoleCredentials.remove(context, host.trim())
+    }
+
+    AsyncFunction("startSession") { host: String, args: RemotePlayArguments ->
+      require(isConsoleIpv4(host)) { "Geçerli bir PS5 IPv4 adresi girin." }
+      require(args.x in 0.0..0.95 && args.y in 0.0..0.95 && args.w >= 0.05 && args.h >= 0.05 &&
+        args.x + args.w <= 1.00001 && args.y + args.h <= 1.00001 && args.sensitivity.isFinite()) {
+        "OCR ayarları geçersiz."
+      }
+      val keys = ConsoleCredentials.read(context, host)
+        ?: error("Seçilen PS5 için önce eşleştirme yapın.")
+      keys.fill(0)
+      RemotePlayService.start(context, RemotePlayOptions(host, SubtitleRegion(args.x, args.y, args.w, args.h),
+        args.intervalMs.coerceIn(150, 2000).toLong(), args.ttlMs.coerceIn(500, 10000).toLong(),
+        args.sensitivity.coerceIn(0.0, 1.0), args.keepWifiAwake))
+    }
+
+    AsyncFunction("translateOffline") { text: String, source: String, target: String ->
+      val from = TranslateLanguage.fromLanguageTag(source) ?: error("Kaynak dil desteklenmiyor.")
+      val to = TranslateLanguage.fromLanguageTag(target) ?: error("Hedef dil desteklenmiyor.")
+      val translator = Translation.getClient(TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build())
+      try {
+        Tasks.await(translator.downloadModelIfNeeded(DownloadConditions.Builder().build()), 180, TimeUnit.SECONDS)
+        Tasks.await(translator.translate(text), 12, TimeUnit.SECONDS)
+      } finally { translator.close() }
+    }
+
+    AsyncFunction("stopSession") { RemotePlayService.stop(context) }
+
+    AsyncFunction("getRemotePlayStatus") {
+      val state = RemotePlayService.status
+      Bundle().apply {
+        putBoolean("active", state.active)
+        putString("host", state.host)
+        putString("console", state.console)
+        putString("session", state.session)
+        putString("video", state.video)
+        putString("ocr", state.ocr)
+        putString("translation", state.translation)
+        putString("english", state.english)
+        putString("turkish", state.turkish)
+        putString("error", state.error)
+      }
+    }
+
     AsyncFunction("discoverConsoles") { timeoutMs: Int ->
-      val found = ArrayList<Bundle>()
-      val seen = HashSet<String>()
-      val deadline = System.currentTimeMillis() + timeoutMs.coerceIn(500, 8000)
+      val found = LinkedHashMap<String, Bundle>()
+      val deadline = SystemClock.elapsedRealtime() + timeoutMs.coerceIn(500, 8000)
       val request = "SRCH * HTTP/1.1\r\ndevice-discovery-protocol-version:00030010\r\n\r\n"
-        .toByteArray(Charsets.UTF_8)
+        .toByteArray(Charsets.US_ASCII)
       DatagramSocket().use { socket ->
         socket.broadcast = true
-        socket.soTimeout = 350
-        val destinations = listOf("255.255.255.255")
+        socket.soTimeout = 300
+        val destinations = buildSet {
+          add(InetAddress.getByName("255.255.255.255"))
+          NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { network ->
+            if (network.isUp && !network.isLoopback) {
+              network.interfaceAddresses.mapNotNullTo(this) { it.broadcast }
+            }
+          }
+        }
         for (destination in destinations) {
-          socket.send(DatagramPacket(request, request.size, InetAddress.getByName(destination), 9302))
+          runCatching { socket.send(DatagramPacket(request, request.size, destination, 9302)) }
         }
         val bytes = ByteArray(4096)
-        while (System.currentTimeMillis() < deadline) {
+        while (SystemClock.elapsedRealtime() < deadline) {
           val packet = DatagramPacket(bytes, bytes.size)
           try {
             socket.receive(packet)
             val message = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
-            if (!message.contains("host-id:", ignoreCase = true) &&
-                !message.contains("host-type:", ignoreCase = true)) continue
-            val host = packet.address.hostAddress ?: continue
-            if (!seen.add(host)) continue
             fun header(name: String): String? = message.lineSequence().firstOrNull {
               it.startsWith("$name:", ignoreCase = true)
             }?.substringAfter(':')?.trim()
-            val state = if (header("host-request-port") == null ||
-              header("status")?.contains("standby", ignoreCase = true) == true) "standby" else "ready"
-            found.add(Bundle().apply {
-              putString("name", header("host-name") ?: "PlayStation")
+            if (!header("host-type").equals("PS5", ignoreCase = true)) continue
+            val host = packet.address.hostAddress ?: continue
+            if (!isConsoleIpv4(host)) continue
+            val state = if (message.lineSequence().first().contains(" 620")) "standby" else "ready"
+            found[host] = Bundle().apply {
+              putString("name", header("host-name") ?: "PS5")
               putString("host", host)
               putString("state", state)
-            })
-          } catch (_: SocketTimeoutException) { /* wait until timeout */ }
+            }
+          } catch (_: SocketTimeoutException) { /* Continue collecting LAN responses. */ }
         }
       }
-      found
+      ArrayList(found.values)
     }
 
     // Temporary real-video path: open a separately installed Chiaki client.

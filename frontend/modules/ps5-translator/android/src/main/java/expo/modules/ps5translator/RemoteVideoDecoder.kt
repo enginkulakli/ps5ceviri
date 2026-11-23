@@ -1,0 +1,116 @@
+package expo.modules.ps5translator
+
+import android.graphics.ImageFormat
+import android.media.Image
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.os.SystemClock
+import java.nio.ByteBuffer
+
+/** The transport thread feeds compressed samples. The service worker drains decoded frames. */
+internal class RemoteVideoDecoder {
+  private val codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+    try {
+      configure(MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1280, 720).apply {
+        setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+        setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024)
+      }, null, null, 0)
+      start()
+    } catch (error: Exception) {
+      release()
+      throw error
+    }
+  }
+  private val outputInfo = MediaCodec.BufferInfo()
+  private var parameterSets: ByteArray? = null
+  private var lastPresentationUs = 0L
+
+  /** The input ByteBuffer is valid only during this call. */
+  fun queue(sample: ByteBuffer): Boolean {
+    val type = firstNalType(sample)
+    if (type == 7 || type == 8) {
+      if (sample.remaining() > 64 * 1024) return false
+      parameterSets = ByteArray(sample.remaining()).also(sample::get)
+      return true
+    }
+    parameterSets?.let { pending ->
+      if (!queueInput(ByteBuffer.wrap(pending), MediaCodec.BUFFER_FLAG_CODEC_CONFIG)) return false
+      parameterSets = null
+    }
+    return queueInput(sample, 0)
+  }
+
+  private fun firstNalType(sample: ByteBuffer): Int {
+    val offset = sample.position()
+    if (sample.remaining() < 4 || sample.get(offset).toInt() != 0 || sample.get(offset + 1).toInt() != 0) return -1
+    val prefix = if (sample.get(offset + 2).toInt() == 1) 3
+      else if (sample.remaining() >= 5 && sample.get(offset + 2).toInt() == 0 &&
+        sample.get(offset + 3).toInt() == 1) 4 else return -1
+    return sample.get(offset + prefix).toInt() and 0x1f
+  }
+
+  private fun queueInput(sample: ByteBuffer, flags: Int): Boolean {
+    val index = codec.dequeueInputBuffer(0)
+    if (index < 0) return false
+    val size = sample.remaining()
+    val input = codec.getInputBuffer(index)
+    if (input == null || size > input.remaining()) {
+      codec.queueInputBuffer(index, 0, 0, lastPresentationUs, 0)
+      return false
+    }
+    input.put(sample)
+    lastPresentationUs = maxOf(lastPresentationUs + 1, SystemClock.elapsedRealtimeNanos() / 1000)
+    codec.queueInputBuffer(index, 0, size, lastPresentationUs, flags)
+    return true
+  }
+
+  fun drain(needImage: () -> Boolean, onFrame: (Image?) -> Unit) {
+    repeat(12) {
+      val index = codec.dequeueOutputBuffer(outputInfo, 0)
+      if (index == MediaCodec.INFO_TRY_AGAIN_LATER) return
+      if (index < 0) return@repeat
+      try {
+        if (outputInfo.size > 0 && outputInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+          val image = if (needImage()) codec.getOutputImage(index) else null
+          image.use { onFrame(it) }
+        }
+      } finally {
+        codec.releaseOutputBuffer(index, false)
+      }
+    }
+  }
+
+  /** Called after the transport has stopped invoking queue(). */
+  fun close() = codec.release()
+}
+
+internal data class SubtitleRegion(val x: Double, val y: Double, val width: Double, val height: Double) {
+  fun crop(image: Image): OcrFrame {
+    check(image.format == ImageFormat.YUV_420_888) { "Video decoder did not return YUV_420_888" }
+    val bounds = image.cropRect
+    val left = ((bounds.width() * x).toInt() + bounds.left).coerceIn(bounds.left, bounds.right - 2)
+    val top = ((bounds.height() * y).toInt() + bounds.top).coerceIn(bounds.top, bounds.bottom - 2)
+    val w = minOf((bounds.width() * width).toInt().coerceAtLeast(2), bounds.right - left) and -2
+    val h = minOf((bounds.height() * height).toInt().coerceAtLeast(2), bounds.bottom - top) and -2
+    val plane = image.planes[0]
+    val buffer = plane.buffer
+    val base = buffer.position()
+    val bytes = ByteArray(w * h * 3 / 2)
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride
+    for (row in 0 until h) {
+      val start = base + (top + row) * rowStride + left * pixelStride
+      if (pixelStride == 1) {
+        buffer.position(start)
+        buffer.get(bytes, row * w, w)
+      } else {
+        for (column in 0 until w) bytes[row * w + column] = buffer.get(start + column * pixelStride)
+      }
+    }
+    bytes.fill(128.toByte(), w * h)
+    return OcrFrame(bytes, w, h)
+  }
+}
+
+internal data class OcrFrame(val nv21: ByteArray, val width: Int, val height: Int)
