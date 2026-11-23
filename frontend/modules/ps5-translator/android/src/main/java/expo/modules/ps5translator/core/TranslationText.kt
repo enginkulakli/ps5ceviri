@@ -5,12 +5,16 @@ import java.text.Normalizer
 internal data class GlossaryEntry(val source: String, val target: String)
 internal data class TextPart(val text: String, val protected: Boolean)
 
+private val wrappedWord = Regex("(?<=\\p{L})-\\s*\\n\\s*(?=\\p{Ll})")
+private val whitespace = Regex("\\s+")
+private val punctuationSpacing = Regex("\\s+([,.!?;:%])")
+
 internal fun cleanOcr(text: String): String = Normalizer.normalize(text, Normalizer.Form.NFKC)
   .replace("\u00ad", "")
-  .replace(Regex("(?<=\\p{L})-\\s*\\n\\s*(?=\\p{Ll})"), "")
+  .replace(wrappedWord, "")
   .replace('’', '\'').replace('‘', '\'').replace('“', '"').replace('”', '"')
-  .replace(Regex("\\s+"), " ")
-  .replace(Regex("\\s+([,.!?;:%])"), "$1")
+  .replace(whitespace, " ")
+  .replace(punctuationSpacing, "$1")
   .trim()
 
 internal class GameGlossary(entries: List<GlossaryEntry>) {
