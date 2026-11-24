@@ -17,7 +17,6 @@ internal class OverlayTracker {
     blocks: List<DetectedText>, now: Long, ttl: Long, sceneChanged: Boolean = false,
     changedAt: (FrameRect) -> Boolean = { false },
   ) {
-    if (sceneChanged) clear()
     alive(now, ttl)
     val remaining = items.values.toMutableList()
     val incoming = blocks.take(24).map { Detection(it, memoryText(it.text)) }
@@ -37,7 +36,8 @@ internal class OverlayTracker {
     val next = LinkedHashMap<Long, Item>()
     for ((index, detection) in incoming.withIndex()) {
       val (block, key) = detection
-      val previous = matched[index] ?: remaining
+      val previous = matched[index] ?: remaining.takeUnless { sceneChanged }
+        .orEmpty()
         .filter { it.rect.distance(block.rect) < .04 && it.rect.overlap(block.rect) > .60 }
         .minByOrNull { it.rect.distance(block.rect) }
         ?.also(remaining::remove)
@@ -47,7 +47,7 @@ internal class OverlayTracker {
     }
     for (old in remaining) {
       if (next.size == 24) break
-      if (old.missed == 0 && !changedAt(old.rect) &&
+      if (!sceneChanged && old.missed == 0 && !changedAt(old.rect) &&
         incoming.none { it.block.rect.overlap(old.rect) > .46 }) {
         next[old.id] = old.copy(missed = 1)
       }

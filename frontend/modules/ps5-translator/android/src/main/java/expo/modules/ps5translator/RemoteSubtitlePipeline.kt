@@ -305,11 +305,13 @@ internal class RemoteSubtitlePipeline(
   }
 
   private fun requestTranslations(sources: List<Pair<String, String>>, now: Long) {
-    val started = System.nanoTime()
     failed.entries.removeAll { now >= it.value }
-    val pending = sources.distinctBy { it.second }
-      .filter { (_, normalized) -> normalized !in cache && normalized !in inFlight && normalized !in failed }
+    if (sources.isEmpty()) return
+    val unique = sources.distinctBy { it.second }
+    val started = System.nanoTime()
+    val misses = unique.filter { (_, normalized) -> normalized !in cache }
     TranslationMetrics.record("ram", started)
+    val pending = misses.filter { (_, normalized) -> normalized !in inFlight && normalized !in failed }
     if (pending.size > inFlight.room) {
       inFlight.releaseObsolete(sources.mapTo(HashSet()) { it.second }, minOf(2, pending.size))
     }
