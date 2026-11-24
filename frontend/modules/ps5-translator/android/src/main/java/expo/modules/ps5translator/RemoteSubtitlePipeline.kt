@@ -333,6 +333,7 @@ internal class RemoteSubtitlePipeline(
           else tracker.text == normalized && SystemClock.elapsedRealtime() - tracker.seenAt < options.ttlMs
         if (!modelReady || !stillVisible) {
           inFlight.finish(normalized, attempt)
+          if (!modelReady) failed[normalized] = SystemClock.elapsedRealtime() + 1000
           return
         }
         translateLive(key, epoch, attempt)

@@ -85,8 +85,8 @@ internal object TvOverlayLayout {
 
   fun arrange(boxes: List<OverlayBox>): List<OverlayBox> {
     val placed = mutableListOf<Placement>()
-    // A small label should compete for its own row before a long block reserves several.
-    val source = boxes.sortedWith(compareBy<OverlayBox> { it.text.length > 60 }
+    // Keep message content when its original area cannot also fit nearby labels.
+    val source = boxes.sortedWith(compareByDescending<OverlayBox> { it.text.length > 60 }
       .thenBy { it.rect.y }.thenBy { it.rect.x }.thenBy { it.id })
     for (box in source) {
       place(box, placed)?.let(placed::add)
@@ -106,7 +106,7 @@ internal object TvOverlayLayout {
       maxOf(width, (glyphs.coerceAtLeast(5) * .55 + 1) * font / VIEW_WIDTH)
     }
     val heights = fontSizes.zip(paintedWidths).map { (font, paintedWidth) -> height(words, paintedWidth, font) }
-    if (heights.last() > .26) return null
+    if (heights.last() > .32) return null
     val idealY = box.rect.y.coerceIn(GAP, 1 - heights.first() - GAP)
     val candidates = mutableSetOf(idealY)
     for (other in placed) {
