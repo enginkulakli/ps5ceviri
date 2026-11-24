@@ -9,7 +9,7 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
   var seenAt = 0L
     private set
 
-  fun observe(raw: String, now: Long): Boolean {
+  fun observe(raw: String, now: Long, reliable: Boolean = false): Boolean {
     if (raw.isBlank()) return false
     val normalized = memoryText(raw)
     if (normalized == text) {
@@ -21,7 +21,12 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     count = if (normalized == candidate && now - candidateAt <= maxOf(1400, intervalMs * 2 + 200)) count + 1 else 1
     candidate = normalized
     candidateAt = now
-    if (count < confirmations) return false
+    val looksCorrupted = text.length >= 12 &&
+      ((text.length == normalized.length && text.indices.count { text[it] != normalized[it] } == 1 &&
+        text.indices.any { text[it] != normalized[it] && text[it].isLetter() && normalized[it].isLetter() }) ||
+        text.replace("rn", "m") == normalized.replace("rn", "m"))
+    // Explicit stricter settings still require all their observations.
+    if (count < confirmations && !(confirmations == 2 && reliable && !looksCorrupted)) return false
     text = normalized
     seenAt = now
     candidate = ""
@@ -29,10 +34,34 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     return true
   }
 
+  fun recentlyRead(now: Long) =
+    (text.isNotEmpty() && now - seenAt < 500) || (candidate.isNotEmpty() && now - candidateAt < 500)
+
+  fun expire(now: Long, ttl: Long) {
+    if (text.isNotEmpty() && now - seenAt >= ttl) {
+      text = ""
+      seenAt = 0
+    }
+  }
+
   fun clear() {
     text = ""
     seenAt = 0
     candidate = ""
     count = 0
+  }
+}
+
+internal data class SubtitleCaption(val source: String, val text: String, val shownAt: Long,
+                                    var until: Long, var sentAt: Long = 0) {
+  companion object {
+    fun select(previous: SubtitleCaption?, source: String, translated: String?, seenAt: Long,
+               now: Long, ttl: Long, minimum: Long): SubtitleCaption? {
+      if (translated != null && (previous?.source != source || previous.text != translated)) {
+        return SubtitleCaption(source, translated, now, maxOf(seenAt + ttl, now + minimum))
+      }
+      if (previous?.source == source) previous.until = maxOf(seenAt + ttl, previous.shownAt + minimum)
+      return previous?.takeIf { now < it.until }
+    }
   }
 }

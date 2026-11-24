@@ -10,6 +10,7 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import expo.modules.ps5translator.core.GameGlossary
+import expo.modules.ps5translator.core.TranslationAttempt
 
 internal const val API_NOT_CONFIGURED = "API yapılandırılmadı"
 
@@ -27,6 +28,7 @@ internal data class TranslationRequest(
   val text: String,
   val glossary: GameGlossary,
   val context: GameContext? = null,
+  val attempt: TranslationAttempt? = null,
 )
 
 internal data class GameContext(val title: String, val recentDialogue: List<String>)

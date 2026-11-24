@@ -4,13 +4,12 @@ internal data class FrameRect(val x: Double, val y: Double, val w: Double, val h
   val cx get() = x + w / 2
   val cy get() = y + h / 2
 
-  fun containsCenter(other: FrameRect) =
-    other.cx in x..(x + w) && other.cy in y..(y + h)
-
   fun distance(other: FrameRect) = kotlin.math.hypot(cx - other.cx, cy - other.cy)
 
   fun follow(other: FrameRect): FrameRect {
-    if (distance(other) < .006 && kotlin.math.abs(w - other.w) < .006 &&
+    val distance = distance(other)
+    if (distance > .018) return other
+    if (distance < .006 && kotlin.math.abs(w - other.w) < .006 &&
       kotlin.math.abs(h - other.h) < .006) return this
     return FrameRect((x + other.x) / 2, (y + other.y) / 2, (w + other.w) / 2, (h + other.h) / 2)
   }

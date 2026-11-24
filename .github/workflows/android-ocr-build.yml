@@ -10,6 +10,7 @@ on:
       - feature/ps5-remote-play-subtitles
       - feature/v2-fullscreen-translation
       - feature/v3-smart-translation
+      - fix/v3-translation-stability
     paths:
       - 'frontend/**'
       - 'third_party/chiaki-ng'

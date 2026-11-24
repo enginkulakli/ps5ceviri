@@ -13,9 +13,13 @@ import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.GameGlossary
 import expo.modules.ps5translator.core.OverlayBox
 import expo.modules.ps5translator.core.OverlayMessage
+import expo.modules.ps5translator.core.OverlayLuma
 import expo.modules.ps5translator.core.OverlayTracker
 import expo.modules.ps5translator.core.SendStatus
 import expo.modules.ps5translator.core.SubtitleTracker
+import expo.modules.ps5translator.core.SubtitleCaption
+import expo.modules.ps5translator.core.TranslationAttempt
+import expo.modules.ps5translator.core.TranslationAttempts
 import expo.modules.ps5translator.core.cleanOcr
 import expo.modules.ps5translator.core.memoryText
 import expo.modules.ps5translator.core.OcrLine
@@ -44,11 +48,11 @@ internal class RemoteSubtitlePipeline(
   private val cache = object : LinkedHashMap<String, String>(128, .75f, true) {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 180
   }
-  private val inFlight = HashSet<String>()
+  private val inFlight = TranslationAttempts()
   private val failed = HashMap<String, Long>()
   private val detectedAt = HashMap<String, Long>()
   private var glossaryVersion = version()
-  private var lastScene: IntArray? = null
+  private var lastScene: OverlayLuma? = null
   private var lastLayoutInputs = emptyList<OverlayBox>()
   private var lastLayout = emptyList<OverlayBox>()
   private var tvOverlayExpires = 0L
@@ -61,11 +65,11 @@ internal class RemoteSubtitlePipeline(
   private var lastScanAt = 0L
   private var videoWidth = 1280
   private var videoHeight = 720
-  private var caption: Caption? = null
+  private var caption: SubtitleCaption? = null
   private var previousOverlay = emptyList<OverlayBox>()
   private val tick = Runnable { reconcile() }
 
-  private data class Caption(val source: String, val text: String, val shownAt: Long, var until: Long, var sentAt: Long)
+  private data class SubtitleRead(val text: String, val reliable: Boolean)
 
   private fun version(): String {
     val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(
@@ -124,7 +128,11 @@ internal class RemoteSubtitlePipeline(
   private val fullScreen get() = options.mode == TranslationMode.FULLSCREEN
   private val scanInterval get() = if (fullScreen) maxOf(options.intervalMs, 500) else options.intervalMs
 
-  fun needsFrame(now: Long) = !closed && !ocrBusy && now - lastScanAt >= scanInterval
+  fun needsFrame(now: Long): Boolean {
+    val interval = if (!fullScreen && scanInterval <= 300 && tracker.recentlyRead(now)) minOf(180, scanInterval)
+      else scanInterval
+    return !closed && !ocrBusy && now - lastScanAt >= interval
+  }
 
   fun process(image: Image) {
     val frame = if (fullScreen) SubtitleRegion(0.0, 0.0, 1.0, 1.0).crop(image)
@@ -148,14 +156,19 @@ internal class RemoteSubtitlePipeline(
         videoWidth = frame.width
         videoHeight = frame.height
         val detected = screenText(task.result, frame.width, frame.height)
-        overlay.observe(detected, now, screenTtl, sceneChanged(frame))
+        val luminance = OverlayLuma(frame.nv21, frame.width, frame.height)
+        val previous = lastScene
+        overlay.observe(detected, now, screenTtl, previous != null && luminance.sceneChanged(previous)) { rect ->
+          previous != null && luminance.changedAt(previous, rect)
+        }
+        lastScene = luminance
         rememberDetections(detected.map { it.text }, comparison)
         update { it.copy(ocr = "Tam ekran · ${detected.size} blok", english = detected.joinToString(" · ") { block -> block.text }.take(420)) }
       } else {
-        val text = subtitleText(task.result, frame.width, frame.height, now)
-        val changed = tracker.observe(text, now)
+        val reading = subtitleText(task.result, frame.width, frame.height, now)
+        val changed = tracker.observe(reading?.text.orEmpty(), now, reliable = reading?.reliable == true)
         rememberDetections(listOfNotNull(tracker.text.takeIf(String::isNotEmpty)), comparison)
-        update { it.copy(ocr = if (text.isEmpty()) "Altyazı aranıyor" else "Altyazı okunuyor",
+        update { it.copy(ocr = if (reading == null) "Altyazı aranıyor" else "Altyazı okunuyor",
           english = if (changed) tracker.text else it.english) }
       }
       TranslationMetrics.record("comparison", comparison)
@@ -180,24 +193,13 @@ internal class RemoteSubtitlePipeline(
     },
   )
 
-  private fun sceneChanged(frame: OcrFrame): Boolean {
-    val sampled = IntArray(48) { index ->
-      val x = (index % 8 * 2 + 1) * frame.width / 16
-      val y = (index / 8 * 2 + 1) * frame.height / 12
-      frame.nv21[y * frame.width + x].toInt() and 255
-    }
-    val previous = lastScene
-    lastScene = sampled
-    return previous != null && sampled.indices.count { kotlin.math.abs(sampled[it] - previous[it]) > 52 } >= 19
-  }
-
   private fun rememberDetections(sources: List<String>, start: Long) {
     val keys = sources.mapTo(HashSet(), ::memoryText)
     detectedAt.keys.retainAll(keys)
     for (key in keys) detectedAt.putIfAbsent(key, start)
   }
 
-  private fun subtitleText(result: Text, width: Int, height: Int, now: Long): String {
+  private fun subtitleText(result: Text, width: Int, height: Int, now: Long): SubtitleRead? {
     val lines = result.textBlocks.flatMap { it.lines }.filter { line ->
       val bounds = line.boundingBox ?: return@filter false
       val text = cleanOcr(line.text)
@@ -211,13 +213,17 @@ internal class RemoteSubtitlePipeline(
     val anchor = lines.minByOrNull { line ->
       val bounds = line.boundingBox!!
       kotlin.math.abs(bounds.centerX() - width / 2) * 3 - minOf(bounds.width(), width / 2)
-    } ?: return ""
+    } ?: return null
     val anchorBounds = anchor.boundingBox!!
-    return cleanOcr(lines.filter { line ->
+    val included = lines.filter { line ->
       val b = line.boundingBox!!
       kotlin.math.abs(b.centerX() - anchorBounds.centerX()) <= width / 5 &&
         kotlin.math.abs(b.centerY() - anchorBounds.centerY()) <= maxOf(b.height(), anchorBounds.height()) * 2
-    }.sortedBy { it.boundingBox!!.top }.take(3).joinToString("\n") { it.text }).take(420)
+    }.sortedBy { it.boundingBox!!.top }.take(3)
+    val source = cleanOcr(included.joinToString("\n") { it.text }).take(420)
+    val reliable = anchorBounds.exactCenterX() / width in .28f.. .72f &&
+      included.all { it.confidence >= .80f && it.boundingBox!!.height() >= maxOf(8, height / 24) }
+    return SubtitleRead(source, reliable)
   }
 
   private fun reconcile() {
@@ -234,14 +240,14 @@ internal class RemoteSubtitlePipeline(
     val now = SystemClock.elapsedRealtime()
     if (fullScreen) {
       val active = overlay.alive(now, screenTtl)
-      requestTranslations(active.filter(overlay::seenInLatestFrame).map { it.text }, now)
+      requestTranslations(active.filter(overlay::seenInLatestFrame).map { it.text to it.normalized }, now)
       val live = active.mapNotNull { item ->
         val text = cache[item.normalized] ?: return@mapNotNull null
         val wasVisible = previousOverlay.any { it.id == item.id && it.text == text }
         if (!wasVisible && !overlay.seenInLatestFrame(item)) return@mapNotNull null
         OverlayBox(item.id, text, item.rect, item.seenAt + screenTtl - now)
       }
-      val inputs = live.map { it.copy(ttlMs = 0) }
+      val inputs = live.map { it.copy(ttlMs = 0) }.sortedBy { it.id }
       if (inputs != lastLayoutInputs) {
         lastLayoutInputs = inputs
         lastLayout = TvOverlayLayout.arrange(inputs)
@@ -265,39 +271,32 @@ internal class RemoteSubtitlePipeline(
       active.minOfOrNull { it.seenAt + screenTtl }?.let { scheduleAt(it, now) }
       return
     }
-    if (tracker.text.isNotEmpty() && now >= tracker.seenAt + options.ttlMs) tracker.clear()
+    tracker.expire(now, options.ttlMs)
     val source = tracker.text
-    if (source.isNotEmpty()) requestTranslations(listOf(source), now)
-    val translated = cache[memoryText(source)]
-    var shown = caption
-    val earliest = (shown?.shownAt ?: 0) + options.minimumMs
-    if (translated != null && (shown == null || ((shown.source != source || shown.text != translated) && now >= earliest))) {
-      shown = Caption(source, translated, now, maxOf(tracker.seenAt + options.ttlMs, now + options.minimumMs), 0)
-      caption = shown
+    if (source.isNotEmpty()) requestTranslations(listOf(source to source), now)
+    val translated = cache[source]
+    val previous = caption
+    val shown = SubtitleCaption.select(previous, source, translated, tracker.seenAt,
+      now, options.ttlMs, options.minimumMs)
+    caption = shown
+    if (shown == null) {
+      previous?.let { ServerController.core.clearIfCurrent(it.text) }
+    } else if (shown !== previous || (shown.source == source &&
+        now - shown.sentAt >= minOf(850, options.ttlMs / 2))) {
       publishCaption(shown, now)
-    } else if (shown != null) {
-      if (shown.source == source) shown.until = maxOf(tracker.seenAt + options.ttlMs, shown.shownAt + options.minimumMs)
-      if (now >= shown.until) {
-        ServerController.core.clearIfCurrent(shown.text)
-        caption = null
-        shown = null
-      } else if (shown.source == source && now - shown.sentAt >= minOf(850, options.ttlMs / 2)) {
-        publishCaption(shown, now)
-      }
     }
-    val next = listOfNotNull(shown?.until, (tracker.seenAt + options.ttlMs).takeIf { source.isNotEmpty() },
-      earliest.takeIf { shown != null && translated != null && (shown.source != source || shown.text != translated) && it > now }).minOrNull()
-    if (next != null) scheduleAt(next, now)
+    listOfNotNull(shown?.until, (tracker.seenAt + options.ttlMs).takeIf { source.isNotEmpty() })
+      .minOrNull()?.let { scheduleAt(it, now) }
   }
 
-  private fun publishCaption(shown: Caption, now: Long) {
+  private fun publishCaption(shown: SubtitleCaption, now: Long) {
     val server = ServerController.core
     val remaining = (shown.until - now).coerceAtLeast(1)
     val started = System.nanoTime()
     if (!server.refresh(shown.text, remaining)) {
       val result = server.send(shown.text, force = true, ttlMs = remaining)
       if (result.status == SendStatus.SENT) {
-        detectedAt[memoryText(shown.source)]?.let { TranslationMetrics.record("ocrToWebSocket", it) }
+        detectedAt[shown.source]?.let { TranslationMetrics.record("ocrToWebSocket", it) }
         update { it.copy(turkish = shown.text) }
       }
     }
@@ -305,38 +304,38 @@ internal class RemoteSubtitlePipeline(
     shown.sentAt = now
   }
 
-  private fun requestTranslations(sources: List<String>, now: Long) {
-    failed.entries.removeAll { now >= it.value }
-    val room = 2 - inFlight.size
-    if (room <= 0) return
+  private fun requestTranslations(sources: List<Pair<String, String>>, now: Long) {
     val started = System.nanoTime()
-    val pending = sources.distinctBy(::memoryText).map { it to memoryText(it) }
-      .filter { (_, normalized) -> normalized !in cache && normalized !in inFlight && normalized !in failed }.take(room)
+    failed.entries.removeAll { now >= it.value }
+    val pending = sources.distinctBy { it.second }
+      .filter { (_, normalized) -> normalized !in cache && normalized !in inFlight && normalized !in failed }
     TranslationMetrics.record("ram", started)
-    for ((source, normalized) in pending) {
+    if (pending.size > inFlight.room) {
+      inFlight.releaseObsolete(sources.mapTo(HashSet()) { it.second }, minOf(2, pending.size))
+    }
+    for ((source, normalized) in pending.take(inFlight.room)) {
       val key = ArchiveKey(options.archive.gameId, source, normalized, options.engine.key, glossaryVersion)
       val policy = options.archive
       val epoch = translationEpoch
-      inFlight.add(normalized)
+      val attempt = inFlight.start(normalized)
       var lookupSettled = false
       fun continueWith(archived: String?) {
-        if (lookupSettled || closed || epoch != translationEpoch) return
+        if (lookupSettled || closed || epoch != translationEpoch || !inFlight.current(normalized, attempt)) return
         lookupSettled = true
         if (archived != null) {
-          inFlight.remove(normalized)
+          inFlight.finish(normalized, attempt)
           cache[normalized] = archived
           reconcile()
           return
         }
         val stillVisible = if (fullScreen) overlay.alive(SystemClock.elapsedRealtime(), screenTtl)
           .any { overlay.seenInLatestFrame(it) && it.normalized == normalized }
-          else memoryText(tracker.text) == normalized
+          else tracker.text == normalized && SystemClock.elapsedRealtime() - tracker.seenAt < options.ttlMs
         if (!modelReady || !stillVisible) {
-          inFlight.remove(normalized)
-          failed[normalized] = SystemClock.elapsedRealtime() + 1000
+          inFlight.finish(normalized, attempt)
           return
         }
-        translateLive(key, epoch)
+        translateLive(key, epoch, attempt)
       }
       val deadline = Runnable { continueWith(null) }
       // Bypass a slow disk lookup only for the free local engine. A cloud fallback
@@ -349,9 +348,9 @@ internal class RemoteSubtitlePipeline(
         handler.post {
           handler.removeCallbacks(deadline)
           if (result.isFailure && key.engine == "google_cloud") {
-            if (closed || epoch != translationEpoch || lookupSettled) return@post
+            if (closed || epoch != translationEpoch || lookupSettled || !inFlight.current(normalized, attempt)) return@post
             lookupSettled = true
-            inFlight.remove(normalized)
+            inFlight.finish(normalized, attempt)
             failed[normalized] = SystemClock.elapsedRealtime() + 3000
             update { it.copy(translation = "Yerel arşiv okunamadı. Google Cloud isteği gönderilmedi.") }
           } else continueWith(result.getOrNull())
@@ -360,20 +359,20 @@ internal class RemoteSubtitlePipeline(
     }
   }
 
-  private fun translateLive(key: ArchiveKey, epoch: Long) {
+  private fun translateLive(key: ArchiveKey, epoch: Long, attempt: TranslationAttempt) {
     val started = System.nanoTime()
     val isCloud = options.engine == EngineId.GOOGLE_CLOUD
-    val stage = if (isCloud) "googleCloud" else "mlkit"
+    attempt.canRelease = isCloud
     val revision = archiveRevision
     update { it.copy(translation = "Çevriliyor") }
-    provider.translate(TranslationRequest(key.source, glossary)).addOnCompleteListener(callbackExecutor) { task ->
-      TranslationMetrics.record(stage, started)
-      if (closed || epoch != translationEpoch) return@addOnCompleteListener
-      inFlight.remove(key.normalized)
+    provider.translate(TranslationRequest(key.source, glossary, attempt = attempt)).addOnCompleteListener(callbackExecutor) { task ->
+      if (!isCloud) TranslationMetrics.record("mlkit", started)
+      if (closed || epoch != translationEpoch || !inFlight.current(key.normalized, attempt)) return@addOnCompleteListener
+      inFlight.finish(key.normalized, attempt)
       val text = if (task.isSuccessful) task.result.trim().take(1200) else ""
       if (text.isBlank()) failed[key.normalized] = SystemClock.elapsedRealtime() + if (isCloud) 30000 else 3000
       else cache[key.normalized] = text
-      update { it.copy(translation = if (inFlight.isNotEmpty()) "Çevriliyor" else if (text.isNotEmpty()) engineReady()
+      update { it.copy(translation = if (inFlight.busy) "Çevriliyor" else if (text.isNotEmpty()) engineReady()
         else if (options.engine == EngineId.GOOGLE_CLOUD) task.exception?.message?.take(180) ?: "Google Cloud çevirisi tamamlanamadı."
         else "Çeviri tamamlanamadı") }
       reconcile()
@@ -389,6 +388,7 @@ internal class RemoteSubtitlePipeline(
     scanEpoch++
     lastScanAt = 0L
     handler.removeCallbacks(tick)
+    inFlight.clear()
     tracker = SubtitleTracker(options.intervalMs, options.confirmations)
     overlay.clear()
     hud.clear()

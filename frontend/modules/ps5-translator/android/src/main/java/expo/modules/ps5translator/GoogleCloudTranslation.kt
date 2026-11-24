@@ -8,6 +8,7 @@ import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
+import expo.modules.ps5translator.core.TranslationAttempt
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -102,7 +103,7 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
     val parts = request.glossary.split(request.text)
     val queries = parts.filter { !it.protected && it.text.any(Char::isLetter) }.map { it.text.trim() }.distinct()
     if (queries.isEmpty()) return@call parts.joinToString("") { it.text }
-    val translations = send(queries)
+    val translations = send(queries, request.attempt)
     val bySource = queries.zip(translations).toMap()
     parts.joinToString("") { part ->
       if (part.protected || part.text.none(Char::isLetter)) part.text
@@ -113,17 +114,18 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
 
   fun test(): Task<String> = Tasks.call(executor) { send(listOf("Hello")).single() }
 
-  private fun send(queries: List<String>): List<String> {
-    check(!closed) { "Çeviri iptal edildi." }
+  private fun send(queries: List<String>, attempt: TranslationAttempt? = null): List<String> {
+    check(!closed && attempt?.cancelled != true) { "Çeviri iptal edildi." }
     val key = try { GoogleKeyStore.read(app) } catch (_: Exception) {
       error("Google Cloud anahtarı okunamadı. Anahtarı yeniden kaydedin.")
     } ?: error(API_NOT_CONFIGURED)
-    val payload = JSONObject().put("q", JSONArray(queries)).put("source", "en")
-      .put("target", "tr").put("format", "text").toString().toByteArray(Charsets.UTF_8)
+    val payload = cloudRequest(queries)
     val conn = URL(ENDPOINT).openConnection() as HttpsURLConnection
     connections.add(conn)
+    var started: Long? = null
     try {
-      check(!closed) { "Çeviri iptal edildi." }
+      attempt?.attach { cancellation.execute(conn::disconnect) }
+      check(!closed && attempt?.cancelled != true) { "Çeviri iptal edildi." }
       TranslationArchive.get(app).reserveCloudUsage(queries.sumOf { it.codePointCount(0, it.length) }, limits.daily, limits.monthly)
       conn.instanceFollowRedirects = false
       conn.connectTimeout = 3500
@@ -135,6 +137,8 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
       conn.setRequestProperty("X-Android-Package", app.packageName)
       appCertificate()?.let { conn.setRequestProperty("X-Android-Cert", it) }
       conn.setFixedLengthStreamingMode(payload.size)
+      check(!closed && attempt?.cancelled != true) { "Çeviri iptal edildi." }
+      started = System.nanoTime()
       conn.outputStream.use { it.write(payload) }
       val code = conn.responseCode
       if (code !in 200..299) error(cloudHttpError(code))
@@ -147,12 +151,10 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
           check(bytes.size() + n <= 1024 * 1024) { "Google Cloud yanıtı çok büyük." }
           bytes.write(buffer, 0, n)
         }
-        JSONObject(bytes.toString("UTF-8")).getJSONObject("data").getJSONArray("translations")
+        cloudResponse(bytes.toString("UTF-8"), queries.size)
       }
-      check(parsed.length() == queries.size) { "Google Cloud eksik yanıt verdi." }
-      val result = queries.indices.map { i -> decodeCloudText(parsed.getJSONObject(i).getString("translatedText")) }
-      GoogleKeyStore.connection(true)
-      return result
+      if (!closed && attempt?.cancelled != true) GoogleKeyStore.connection(true)
+      return parsed
     } catch (e: Exception) {
       val message = when (e) {
         is IOException -> "Google Cloud bağlantısı kesildi veya zaman aşımına uğradı."
@@ -160,9 +162,11 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
         is IllegalStateException -> e.message ?: "Google Cloud isteği tamamlanamadı."
         else -> "Google Cloud isteği tamamlanamadı."
       }
-      if (!closed) GoogleKeyStore.connection(false, message)
+      if (!closed && attempt?.cancelled != true) GoogleKeyStore.connection(false, message)
       throw IllegalStateException(message)
     } finally {
+      started?.let { TranslationMetrics.record("googleCloud", it) }
+      attempt?.detach()
       connections.remove(conn)
       conn.disconnect()
     }
@@ -187,7 +191,18 @@ internal class GoogleCloudProvider(context: Context, private val limits: CloudLi
   companion object {
     private const val ENDPOINT = "https://translation.googleapis.com/language/translate/v2"
     private val executor = Executors.newFixedThreadPool(2)
+    private val cancellation = Executors.newSingleThreadExecutor()
   }
+}
+
+internal fun cloudRequest(queries: List<String>): ByteArray =
+  JSONObject().put("q", JSONArray(queries)).put("source", "en").put("target", "tr").put("format", "text")
+    .toString().toByteArray(Charsets.UTF_8)
+
+internal fun cloudResponse(body: String, expected: Int): List<String> {
+  val parsed = JSONObject(body).getJSONObject("data").getJSONArray("translations")
+  check(parsed.length() == expected) { "Google Cloud eksik yanıt verdi." }
+  return List(expected) { i -> decodeCloudText(parsed.getJSONObject(i).getString("translatedText")) }
 }
 
 internal fun cloudHttpError(code: Int): String = when (code) {
