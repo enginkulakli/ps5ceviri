@@ -11,6 +11,7 @@ on:
       - feature/v2-fullscreen-translation
       - feature/v3-smart-translation
       - fix/v3-translation-stability
+      - fix/v3-console-management
     paths:
       - 'frontend/**'
       - 'third_party/chiaki-ng'
