@@ -21,10 +21,7 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     count = if (normalized == candidate && now - candidateAt <= maxOf(1400, intervalMs * 2 + 200)) count + 1 else 1
     candidate = normalized
     candidateAt = now
-    val looksCorrupted = text.length >= 12 &&
-      ((text.length == normalized.length && text.indices.count { text[it] != normalized[it] } == 1 &&
-        text.indices.any { text[it] != normalized[it] && text[it].isLetter() && normalized[it].isLetter() }) ||
-        text.replace("rn", "m") == normalized.replace("rn", "m"))
+    val looksCorrupted = text.length >= 12 && looksLikeOcrJitter(text, normalized)
     // Explicit stricter settings still require all their observations.
     if (count < confirmations && !(confirmations == 2 && reliable && !looksCorrupted)) return false
     text = normalized
@@ -50,6 +47,14 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     candidate = ""
     count = 0
   }
+}
+
+private fun looksLikeOcrJitter(current: String, incoming: String): Boolean {
+  if (current.replace("rn", "m") == incoming.replace("rn", "m")) return true
+  if (current.length != incoming.length) return false
+  val changed = current.indices.filter { current[it] != incoming[it] }.singleOrNull() ?: return false
+  return changed in 1 until current.lastIndex && current[changed - 1].isLowerCase() &&
+    current[changed + 1].isLowerCase() && current[changed].isLowerCase() && incoming[changed].isLowerCase()
 }
 
 internal data class SubtitleCaption(val source: String, val text: String, val shownAt: Long,
