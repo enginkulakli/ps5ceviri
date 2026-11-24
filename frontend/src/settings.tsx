@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 import { OcrRegion } from "@/src/native/bridge";
+import type { ConsoleRecord } from "@/src/native/consoleRecords";
 import { storage } from "@/src/utils/storage";
 
-export type Console = { id: string; name: string; host: string; registered: boolean };
+export type Console = ConsoleRecord;
 
 export type TranslationMode = "subtitle" | "fullscreen";
 export type TranslationEngine = "offline" | "google_cloud" | "ai";
@@ -68,7 +69,9 @@ export const DEFAULT_SETTINGS: Settings = {
 const KEY = "app_settings_v1";
 export const PSN_ACCOUNT_KEY = "psn_account_id";
 
-type Ctx = { settings: Settings; ready: boolean; update: (patch: Partial<Settings>) => void };
+// Functional patches keep asynchronous discovery from overwriting other settings.
+type SettingsPatch = Partial<Settings> | ((current: Settings) => Partial<Settings> | null);
+type Ctx = { settings: Settings; ready: boolean; update: (patch: SettingsPatch) => void };
 const SettingsContext = createContext<Ctx | null>(null);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
@@ -98,9 +101,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const update = useCallback((patch: Partial<Settings>) => {
+  const update = useCallback((patch: SettingsPatch) => {
     setSettings((prev) => {
-      const next = { ...prev, ...patch };
+      const values = typeof patch === "function" ? patch(prev) : patch;
+      if (values === null) return prev;
+      const next = { ...prev, ...values };
       storage.setItem(KEY, JSON.stringify(next));
       return next;
     });

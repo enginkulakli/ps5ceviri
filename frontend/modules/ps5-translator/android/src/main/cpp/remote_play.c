@@ -16,7 +16,7 @@ typedef struct {
 
 typedef struct {
     bool success;
-    uint8_t keys[32];
+    uint8_t material[32 + 6];
 } RegistrationResult;
 
 static JavaVM *vm;
@@ -38,8 +38,9 @@ static void registration_event(ChiakiRegistEvent *event, void *user)
 {
     RegistrationResult *result = user;
     if (event->type != CHIAKI_REGIST_EVENT_TYPE_FINISHED_SUCCESS) return;
-    memcpy(result->keys, event->registered_host->rp_regist_key, 16);
-    memcpy(result->keys + 16, event->registered_host->rp_key, 16);
+    memcpy(result->material, event->registered_host->rp_regist_key, 16);
+    memcpy(result->material + 16, event->registered_host->rp_key, 16);
+    memcpy(result->material + 32, event->registered_host->server_mac, sizeof(event->registered_host->server_mac));
     result->success = true;
 }
 
@@ -68,8 +69,8 @@ Java_expo_modules_ps5translator_RemotePlayNative_register(
     chiaki_regist_fini(&registration);
     OPENSSL_cleanse(&registration, sizeof(registration));
     if (!result.success) return NULL;
-    jbyteArray keys = (*env)->NewByteArray(env, sizeof(result.keys));
-    if (keys) (*env)->SetByteArrayRegion(env, keys, 0, sizeof(result.keys), (jbyte *)result.keys);
+    jbyteArray keys = (*env)->NewByteArray(env, sizeof(result.material));
+    if (keys) (*env)->SetByteArrayRegion(env, keys, 0, sizeof(result.material), (jbyte *)result.material);
     OPENSSL_cleanse(&result, sizeof(result));
     return keys;
 }

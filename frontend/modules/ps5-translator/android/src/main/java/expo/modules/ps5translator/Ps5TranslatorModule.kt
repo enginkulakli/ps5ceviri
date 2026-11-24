@@ -5,12 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.NetworkInterface
-import android.os.SystemClock
-import java.net.SocketTimeoutException
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -38,6 +32,7 @@ class ServerStartException(message: String) : CodedException("ERR_TV_SERVER_STAR
 class RemotePlayArguments : Record {
   @Field var settingsJson: String = "{}"
   @Field var keepWifiAwake: Boolean = true
+  @Field var pairingReference: String? = null
 }
 
 class Ps5TranslatorModule : Module() {
@@ -128,7 +123,16 @@ class Ps5TranslatorModule : Module() {
     }
 
     AsyncFunction("registerConsole") { host: String, account: String, pin: String ->
-      ConsoleCredentials.register(context, host.trim(), account, pin.trim())
+      pairingBundle(ConsoleCredentials.register(context, host.trim(), account, pin.trim()))
+    }
+
+    AsyncFunction("getConsolePairing") { reference: String ->
+      pairingBundle(ConsoleCredentials.inspect(context, reference))
+    }
+
+    AsyncFunction("getInstalledVersionName") {
+      @Suppress("DEPRECATION")
+      context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }
 
     AsyncFunction("isConsoleRegistered") { host: String ->
@@ -137,17 +141,22 @@ class Ps5TranslatorModule : Module() {
       keys != null
     }
 
-    AsyncFunction("forgetConsole") { host: String ->
-      require(RemotePlayService.status.host != host) { "PS5 kaydını silmeden önce çeviriyi durdurun." }
-      ConsoleCredentials.remove(context, host.trim())
+    AsyncFunction("forgetConsole") { reference: String ->
+      val status = RemotePlayService.status
+      val identity = ConsoleCredentials.identityOf(context, reference)
+      require(status.pairingReference != reference && (identity == null || status.consoleIdentity != identity)) {
+        "PS5 kaydını silmeden önce çeviriyi durdurun."
+      }
+      ConsoleCredentials.remove(context, reference)
     }
 
     AsyncFunction("startSession") { host: String, args: RemotePlayArguments ->
       require(isConsoleIpv4(host)) { "Geçerli bir PS5 IPv4 adresi girin." }
-      val keys = ConsoleCredentials.read(context, host)
-        ?: error("Seçilen PS5 için önce eşleştirme yapın.")
+      val reference = args.pairingReference ?: host
+      val keys = ConsoleCredentials.read(context, reference)
+        ?: error("Seçilen PS5'in eşleştirme kaydı bulunamadı.")
       keys.fill(0)
-      RemotePlayService.start(context, host, args.keepWifiAwake, args.settingsJson)
+      RemotePlayService.start(context, host, reference, args.keepWifiAwake, args.settingsJson)
     }
 
     AsyncFunction("updateTranslation") { json: String -> RemotePlayService.configure(TranslationOptions.parse(json)) }
@@ -269,6 +278,8 @@ class Ps5TranslatorModule : Module() {
         putBoolean("active", state.active)
         putInt("overlayClients", ServerController.core.overlayClientCount())
         putString("host", state.host)
+        putString("pairingReference", state.pairingReference)
+        putString("consoleIdentity", state.consoleIdentity)
         putString("console", state.console)
         putString("session", state.session)
         putString("video", state.video)
@@ -281,46 +292,14 @@ class Ps5TranslatorModule : Module() {
     }
 
     AsyncFunction("discoverConsoles") { timeoutMs: Int ->
-      val found = LinkedHashMap<String, Bundle>()
-      val deadline = SystemClock.elapsedRealtime() + timeoutMs.coerceIn(500, 8000)
-      val request = "SRCH * HTTP/1.1\r\ndevice-discovery-protocol-version:00030010\r\n\r\n"
-        .toByteArray(Charsets.US_ASCII)
-      DatagramSocket().use { socket ->
-        socket.broadcast = true
-        socket.soTimeout = 300
-        val destinations = buildSet {
-          add(InetAddress.getByName("255.255.255.255"))
-          NetworkInterface.getNetworkInterfaces()?.toList()?.forEach { network ->
-            if (network.isUp && !network.isLoopback) {
-              network.interfaceAddresses.mapNotNullTo(this) { it.broadcast }
-            }
-          }
+      ArrayList(ConsoleDiscovery.scan(timeoutMs).map { console ->
+        Bundle().apply {
+          putString("name", console.name)
+          putString("host", console.host)
+          putString("identity", console.identity)
+          putString("state", if (console.standby) "standby" else "ready")
         }
-        for (destination in destinations) {
-          runCatching { socket.send(DatagramPacket(request, request.size, destination, 9302)) }
-        }
-        val bytes = ByteArray(4096)
-        while (SystemClock.elapsedRealtime() < deadline) {
-          val packet = DatagramPacket(bytes, bytes.size)
-          try {
-            socket.receive(packet)
-            val message = String(packet.data, packet.offset, packet.length, Charsets.UTF_8)
-            fun header(name: String): String? = message.lineSequence().firstOrNull {
-              it.startsWith("$name:", ignoreCase = true)
-            }?.substringAfter(':')?.trim()
-            if (!header("host-type").equals("PS5", ignoreCase = true)) continue
-            val host = packet.address.hostAddress ?: continue
-            if (!isConsoleIpv4(host)) continue
-            val state = if (message.lineSequence().first().contains(" 620")) "standby" else "ready"
-            found[host] = Bundle().apply {
-              putString("name", header("host-name") ?: "PS5")
-              putString("host", host)
-              putString("state", state)
-            }
-          } catch (_: SocketTimeoutException) { /* Continue collecting LAN responses. */ }
-        }
-      }
-      ArrayList(found.values)
+      })
     }
 
     // Temporary real-video path: open a separately installed Chiaki client.
@@ -417,6 +396,12 @@ class Ps5TranslatorModule : Module() {
         context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
       }
     }
+  }
+
+  private fun pairingBundle(pairing: ConsolePairing) = Bundle().apply {
+    putString("reference", pairing.reference)
+    putString("identity", pairing.identity)
+    putBoolean("registered", pairing.registered)
   }
 
   private fun archiveTask(db: TranslationArchive, write: Boolean, promise: Promise, action: () -> Any?) {

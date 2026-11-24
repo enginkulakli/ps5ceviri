@@ -1,5 +1,6 @@
 import * as Network from "expo-network";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +11,8 @@ import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/co
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
 import { hasNative, nativeModule, NATIVE_REQUIRED_MESSAGE, Ps5TranslatorNativeModule } from "@/src/native/bridge";
+import { applyConsoleDiscovery, changeConsoleAddress, credentialSlot, mergeByConsoleIdentity,
+  nextConsoleId, validConsoleAddress } from "@/src/native/consoleRecords";
 import { useRemotePlay } from "@/src/native/RemotePlayProvider";
 import { PSN_ACCOUNT_KEY, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -29,15 +32,15 @@ export default function ConnectScreen() {
   const wide = width >= 900;
   const { settings, ready, update } = useSettings();
   const { status } = useRemotePlay();
-  const settingsRef = useRef(settings);
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
-  const automaticDiscovery = useRef(false);
+  const operation = useRef(false);
 
   const [tabletIp, setTabletIp] = useState<string | null>(null);
   const [wifi, setWifi] = useState<string>("");
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
   const [hostErr, setHostErr] = useState<string | null>(null);
+  const [ipEdit, setIpEdit] = useState<{ id: string; value: string } | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState("");
   const [accountSaved, setAccountSaved] = useState(false);
   const [pin, setPin] = useState("");
@@ -57,30 +60,38 @@ export default function ConnectScreen() {
     if (Platform.OS === "android") storage.secureGet(PSN_ACCOUNT_KEY, null).then((v) => setAccountSaved(!!v));
   }, []);
 
-  const needNative = async (key: string, setMsg: (m: Msg) => void, fn: () => Promise<string>, nativeFn: keyof Ps5TranslatorNativeModule) => {
+  const needNative = useCallback(async (key: string, setMsg: (m: Msg) => void, fn: () => Promise<string>, nativeFn: keyof Ps5TranslatorNativeModule) => {
+    if (operation.current) return;
     if (!hasNative(nativeFn)) {
       setMsg({ kind: "warning", text: NATIVE_REQUIRED_MESSAGE });
       return;
     }
+    operation.current = true;
     setBusy(key);
     try {
       setMsg({ kind: "success", text: await fn() });
-    } catch (e: any) {
-      setMsg({ kind: "error", text: e?.message ?? "Bilinmeyen hata" });
+    } catch (cause) {
+      setMsg({ kind: "error", text: cause instanceof Error ? cause.message : "Bilinmeyen hata" });
     } finally {
+      operation.current = false;
       setBusy(null);
     }
-  };
+  }, []);
 
   const addConsole = () => {
-    if (!IP_RE.test(host.trim()) || /^(0|127|22[4-9]|2[3-5]\d)\./.test(host.trim())) {
+    const address = host.trim();
+    if (!validConsoleAddress(address)) {
       setHostErr("Geçerli bir IPv4 adresi girin (örn. 192.168.1.40)");
       return;
     }
     setHostErr(null);
-    const existing = settings.consoles.find((console) => console.host === host.trim());
-    const console = existing ?? { id: host.trim(), name: name.trim() || "PS5", host: host.trim(), registered: false };
-    update({ consoles: existing ? settings.consoles : [...settings.consoles, console], selectedConsoleId: console.id });
+    update(current => {
+      const existing = current.consoles.find(console => console.host === address);
+      if (existing) return { selectedConsoleId: existing.id };
+      const console = { id: nextConsoleId(current.consoles, "manual:" + address),
+        name: name.trim() || "PS5", host: address, registered: false };
+      return { consoles: [...current.consoles, console], selectedConsoleId: console.id };
+    });
     setName("");
     setHost("");
     setPsMsg({ kind: "success", text: "Konsol eklendi. Bağlanmak için cihaz kaydı gerekir." });
@@ -99,32 +110,30 @@ export default function ConnectScreen() {
     setPsMsg(ok ? { kind: "success", text: "PSN Account ID cihazın güvenli deposuna kaydedildi." } : { kind: "error", text: "Güvenli depoya yazılamadı." });
   };
 
-  const discover = () => needNative("discover", setPsMsg, async () => {
+  const discover = useCallback(() => needNative("discover", setPsMsg, async () => {
     const found = await nativeModule!.discoverConsoles(3000);
-    const current = settingsRef.current;
-    const known = new Set(current.consoles.map((console) => console.host));
-    const added = await Promise.all(found.filter((console) => !known.has(console.host)).map(async (console) => ({
-      id: console.host, name: console.name, host: console.host,
-      registered: await nativeModule!.isConsoleRegistered(console.host),
-    })));
-    const latest = settingsRef.current;
-    const newConsoles = added.filter((console) => !latest.consoles.some((existing) => existing.host === console.host));
-    if (newConsoles.length) {
-      update({ consoles: [...latest.consoles, ...newConsoles],
-        selectedConsoleId: latest.selectedConsoleId ?? latest.consoles[0]?.id ?? newConsoles[0].id });
-    }
-    return found.length
-      ? found.map((console) => `${console.name} (${console.host}) · ${console.state === "ready" ? "Açık" : "Dinlenme modu"}`).join("\n")
-      : "PS5 bulunamadı. Konsolun açık ve tabletle aynı yerel ağda olduğunu kontrol edin.";
-  }, "discoverConsoles");
+    if (!found.length) throw new Error("PS5 bulunamadı. Konsolun açık ve tabletle aynı yerel ağda olduğunu kontrol edin.");
+    const identities = [...new Set(found.flatMap(console => console.identity ? [console.identity] : []))];
+    const results = await Promise.allSettled(identities.map(identity => nativeModule!.getConsolePairing("mac-" + identity)));
+    const pairings = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+    update(current => applyConsoleDiscovery(current, found, pairings));
+    return "Ağdaki PS5 kayıtları güncellendi.";
+  }, "getConsolePairing"), [needNative, update]);
 
-  useEffect(() => {
-    if (!ready || automaticDiscovery.current || !hasNative("discoverConsoles")) return;
-    automaticDiscovery.current = true;
-    void discover();
-    // Run once when the connection screen first opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  useFocusEffect(useCallback(() => {
+    if (ready && hasNative("discoverConsoles") && hasNative("getConsolePairing")) void discover();
+  }, [ready, discover]));
+
+  const saveIp = () => {
+    if (!ipEdit || status?.active || operation.current) return;
+    try {
+      update(changeConsoleAddress(settings, ipEdit.id, ipEdit.value.trim()));
+      setIpEdit(null);
+      setPsMsg({ kind: "success", text: "PS5 IP adresi kaydedildi." });
+    } catch (cause) {
+      setEditError(cause instanceof Error ? cause.message : "IP adresi kaydedilemedi.");
+    }
+  };
 
   const selected = settings.consoles.find((console) => console.id === settings.selectedConsoleId)
     ?? settings.consoles.find((console) => console.registered) ?? settings.consoles[0];
@@ -148,7 +157,7 @@ export default function ConnectScreen() {
         <Text style={styles.label}>Manuel ekle</Text>
         <Field testID="console-name-input" label="Ad" placeholder="Salon PS5" value={name} onChangeText={setName} />
         <Field testID="console-ip-input" label="PS5 IP adresi" placeholder="192.168.1.40" keyboardType="numbers-and-punctuation" autoCapitalize="none" value={host} onChangeText={setHost} error={hostErr} />
-        <Button testID="add-console-button" label="PS5 ekle" icon="add-circle-outline" onPress={addConsole} />
+        <Button testID="add-console-button" label="PS5 ekle" icon="add-circle-outline" disabled={busy !== null} onPress={addConsole} />
         {settings.consoles.length ? (
           <View style={{ gap: space.sm }} testID="console-list">
             {settings.consoles.map((c) => (
@@ -161,18 +170,35 @@ export default function ConnectScreen() {
                   variant="secondary" disabled={selected?.id === c.id || status?.active}
                   onPress={() => update({ selectedConsoleId: c.id })} />
                 <Button testID={`remove-console-${c.id}`} label="Sil" variant="danger" style={{ minHeight: 44 }}
-                  disabled={status?.host === c.host || busy !== null}
+                  disabled={status?.active || busy !== null}
                   onPress={() => needNative("forget", setPsMsg, async () => {
-                    await nativeModule!.forgetConsole(c.host);
-                    const latest = settingsRef.current;
-                    update({ consoles: latest.consoles.filter((item) => item.id !== c.id),
-                      selectedConsoleId: latest.selectedConsoleId === c.id ? null : latest.selectedConsoleId });
+                    await nativeModule!.forgetConsole(credentialSlot(c));
+                    update(current => ({
+                      consoles: current.consoles.filter(item => item.id !== c.id),
+                      selectedConsoleId: current.selectedConsoleId === c.id ? null : current.selectedConsoleId,
+                    }));
                     return "Konsol kaldırıldı.";
                   }, "forgetConsole")} />
               </View>
             ))}
           </View>
         ) : null}
+        {selected && !ipEdit ? (
+          <Button testID="edit-console-ip-button" label="IP Düzenle" variant="secondary"
+            disabled={busy !== null || status?.active} onPress={() => {
+              setIpEdit({ id: selected.id, value: selected.host });
+              setEditError(null);
+            }} />
+        ) : null}
+        {ipEdit ? <>
+          <Field testID="edit-console-ip-input" label={(settings.consoles.find(console => console.id === ipEdit.id)?.name ?? "PS5") + " · IPv4 adresi"}
+            value={ipEdit.value} error={editError} autoCapitalize="none" keyboardType="numbers-and-punctuation"
+            editable={busy === null && !status?.active} onChangeText={value => setIpEdit({ ...ipEdit, value })} />
+          <View style={styles.rowBetween}>
+            <Button testID="save-console-ip-button" label="Kaydet" disabled={busy !== null || status?.active} onPress={saveIp} />
+            <Button label="İptal" variant="ghost" onPress={() => setIpEdit(null)} />
+          </View>
+        </> : null}
       </Card>
 
       <SectionTitle title="PSN kimliği ve cihaz kaydı" />
@@ -193,9 +219,13 @@ export default function ConnectScreen() {
             if (typeof account !== "string") throw new Error("Önce PSN Account ID kaydedin.");
             if (!/^\d{8}$/.test(pin)) throw new Error("PIN 8 haneli olmalıdır.");
             setPin("");
-            await nativeModule!.registerConsole(selected.host, account, pin);
-            update({ consoles: settingsRef.current.consoles.map((console) => console.id === selected.id
-              ? { ...console, registered: true } : console), selectedConsoleId: selected.id });
+            const pairing = await nativeModule!.registerConsole(selected.host, account, pin);
+            update(current => mergeByConsoleIdentity({
+              consoles: current.consoles.map(console => console.id === selected.id
+                ? { ...console, registered: pairing.registered, identity: pairing.identity,
+                  pairingReference: pairing.reference } : console),
+              selectedConsoleId: selected.id,
+            }));
             return "Eşleştirme tamamlandı. Durum sekmesinden çeviriyi başlatabilirsiniz.";
           }, "registerConsole")} />
         {psMsg ? <Notice kind={psMsg.kind} text={psMsg.text} testID="ps5-message" /> : null}

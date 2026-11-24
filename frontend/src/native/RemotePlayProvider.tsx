@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { AppState } from "react-native";
 
 import { hasNative, nativeModule, type RemotePlayStatus } from "@/src/native/bridge";
+import { applyPairingRecords, credentialSlot, mergeByConsoleIdentity } from "@/src/native/consoleRecords";
 import { useSettings } from "@/src/settings";
 import { useTvServer } from "@/src/tv/TvServerProvider";
 
@@ -57,19 +58,32 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const bridge = nativeModule;
-    if (!ready || !bridge || !hasNative("isConsoleRegistered")) return;
+    if (!ready || !bridge || !hasNative("getConsolePairing")) return;
     let alive = true;
-    const consoles = settings.consoles;
-    Promise.all(consoles.map(async (console) => ({
-      ...console,
-      registered: await bridge.isConsoleRegistered(console.host),
-    }))).then((verified) => {
-      if (alive && verified.some((console, index) => console.registered !== consoles[index].registered)) {
-        update({ consoles: verified });
-      }
+    const references = new Set(settings.consoles.map(credentialSlot));
+    Promise.allSettled([...references].map(reference => bridge.getConsolePairing(reference))).then(results => {
+      if (!alive) return;
+      const pairings = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+      update(current => {
+        const next = applyPairingRecords(current, pairings);
+        return next.selectedConsoleId !== current.selectedConsoleId || next.consoles.length !== current.consoles.length ||
+          next.consoles.some((console, index) => console !== current.consoles[index]) ? next : null;
+      });
     }).catch(() => {});
     return () => { alive = false; };
   }, [ready, settings.consoles, update]);
+
+  const { host, pairingReference, consoleIdentity } = status ?? {};
+  useEffect(() => {
+    if (!ready || !host || !pairingReference || !consoleIdentity) return;
+    update(current => {
+      const selected = current.consoles.find(console => credentialSlot(console) === pairingReference);
+      if (!selected || (selected.host === host && selected.identity === consoleIdentity)) return null;
+      const consoles = current.consoles.map(console => console.id === selected.id
+        ? { ...console, host, pairingReference, identity: consoleIdentity } : console);
+      return mergeByConsoleIdentity({ consoles, selectedConsoleId: current.selectedConsoleId });
+    });
+  }, [ready, host, pairingReference, consoleIdentity, update]);
 
   const toggle = async () => {
     if (!nativeModule || busy) return;
@@ -82,7 +96,7 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
         const selected = settings.consoles.find((console) => console.id === settings.selectedConsoleId)
           ?? settings.consoles.find((console) => console.registered);
         if (!selected?.registered) throw new Error("Bağlantı sekmesinde bir PS5 seçip eşleştirin.");
-        await nativeModule.startSession(selected.host, { settingsJson, keepWifiAwake: settings.keepWifiAwake });
+        await nativeModule.startSession(selected.host, { settingsJson, keepWifiAwake: settings.keepWifiAwake, pairingReference: credentialSlot(selected) });
         if (!tv.state?.running && tv.busy !== "start") void tv.start();
       }
       setStatus(await nativeModule.getRemotePlayStatus());

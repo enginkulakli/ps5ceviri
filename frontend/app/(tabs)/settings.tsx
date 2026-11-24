@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Ionicons } from "@react-native-vector-icons/ionicons";
 import { router } from "expo-router";
 import { Linking, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
@@ -12,6 +13,7 @@ import { RegionPreview } from "@/src/components/RegionPreview";
 import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button, Card, Chip, Notice, SectionTitle, StatusBadge, Stepper, ToggleRow } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
+import { hasNative, nativeModule } from "@/src/native/bridge";
 import { usesNativeTabs } from "@/src/navigation";
 import { DEFAULT_SETTINGS, type TranslationEngine, useSettings } from "@/src/settings";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -43,6 +45,15 @@ export default function SettingsScreen() {
   const wide = width >= 900;
   const { settings: s, ready, update } = useSettings();
   const tv = useTvServer();
+  const [versionName, setVersionName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hasNative("getInstalledVersionName")) return;
+    let mounted = true;
+    void nativeModule!.getInstalledVersionName().then(version => {
+      if (mounted) setVersionName(version);
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   const left = (
     <View style={wide ? { flex: 1 } : undefined}>
@@ -166,6 +177,7 @@ export default function SettingsScreen() {
             {right}
           </>
         )}
+        {versionName ? <Text style={styles.meta} testID="app-version">v{versionName}</Text> : null}
       </KeyboardAwareScrollView>
     </View>
   );

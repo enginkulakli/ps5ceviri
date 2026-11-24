@@ -1,8 +1,11 @@
 import { requireOptionalNativeModule } from "expo";
+import type { ConsolePairing, DiscoveredConsole } from "@/src/native/consoleRecords";
 
 export type RemotePlayStatus = {
   active: boolean;
   host: string | null;
+  pairingReference: string | null;
+  consoleIdentity: string | null;
   console: string;
   session: string;
   video: string;
@@ -16,7 +19,6 @@ export type RemotePlayStatus = {
 
 export type OcrRegion = { x: number; y: number; w: number; h: number };
 
-export type DiscoveredConsole = { name: string; host: string; state: "ready" | "standby" };
 
 export type TvServerState = {
   running: boolean;
@@ -62,10 +64,12 @@ export interface Ps5TranslatorNativeModule {
   recognizeLatestScreen(): Promise<Array<{text: string; left: number; top: number; right: number; bottom: number}>>;
   openExternalRemotePlay(): Promise<boolean>;
   discoverConsoles(timeoutMs: number): Promise<DiscoveredConsole[]>;
-  registerConsole(host: string, psnAccountIdBase64: string, pin: string): Promise<void>;
+  registerConsole(host: string, psnAccountIdBase64: string, pin: string): Promise<ConsolePairing>;
+  getConsolePairing(reference: string): Promise<ConsolePairing>;
+  getInstalledVersionName(): Promise<string | null>;
   isConsoleRegistered(host: string): Promise<boolean>;
-  forgetConsole(host: string): Promise<void>;
-  startSession(host: string, options: { settingsJson: string; keepWifiAwake: boolean }): Promise<void>;
+  forgetConsole(reference: string): Promise<void>;
+  startSession(host: string, options: { settingsJson: string; keepWifiAwake: boolean; pairingReference?: string }): Promise<void>;
   updateTranslation(settingsJson: string): Promise<void>;
   getCloudStatus(): Promise<string>;
   saveCloudKey(key: string): Promise<void>;

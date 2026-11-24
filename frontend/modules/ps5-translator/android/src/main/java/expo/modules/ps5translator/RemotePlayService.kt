@@ -16,10 +16,13 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import java.nio.ByteBuffer
+import java.util.concurrent.Executors
 
 internal data class RemotePlayStatus(
   val active: Boolean = false,
   val host: String? = null,
+  val pairingReference: String? = null,
+  val consoleIdentity: String? = null,
   val console: String = "Bekliyor",
   val session: String = "Kapalı",
   val video: String = "Bekliyor",
@@ -76,11 +79,13 @@ class RemotePlayService : Service() {
 
   private fun begin(intent: Intent) {
     val host = intent.getStringExtra("host") ?: return
-    if (options?.host == host) return
+    val reference = intent.getStringExtra("pairing") ?: host
+    if (options?.host == host && status.pairingReference == reference) return
     stopWork()
     val config = RemotePlayOptions(host, intent.getBooleanExtra("wifi", true),
       TranslationOptions.parse(intent.getStringExtra("translation") ?: "{}"))
-    status = RemotePlayStatus(active = true, host = host, console = "PS5'e bağlanılıyor")
+    status = RemotePlayStatus(active = true, host = host, pairingReference = reference,
+      consoleIdentity = ConsoleCredentials.identityOf(applicationContext, reference), console = "PS5'e bağlanılıyor")
     options = config
     attemptNumber = 0
     try {
@@ -95,11 +100,12 @@ class RemotePlayService : Service() {
   private fun connect() {
     val config = options ?: return
     status = status.copy(console = "PS5'e bağlanılıyor", session = "Oturum açılıyor", video = "Kare bekleniyor", error = null)
+    val reference = status.pairingReference ?: config.host
     val keys = try {
-      ConsoleCredentials.read(applicationContext, config.host)
-        ?: return finish("Seçilen PS5 için önce eşleştirme yapın.")
+      ConsoleCredentials.read(applicationContext, reference)
+        ?: return finish("Seçilen PS5'in eşleştirme kaydı bulunamadı.")
     } catch (_: Exception) {
-      return finish("PS5 eşleştirme anahtarları okunamadı. Konsolu yeniden eşleştirin.")
+      return finish("PS5 eşleştirme anahtarları okunamadı.")
     }
     val token = ++streamToken
     val videoDecoder = try {
@@ -122,7 +128,10 @@ class RemotePlayService : Service() {
           handler.post {
             if (token != streamToken) return@post
             when (code) {
-              0 -> update { it.copy(console = "PS5 bağlı", session = "Remote Play açık") }
+              0 -> {
+                update { it.copy(console = "PS5 bağlı", session = "Remote Play açık") }
+                if (status.consoleIdentity == null) identifyConnectedConsole(config.host, reference, token)
+              }
               1 -> finish("PS5 oturum için kullanıcı giriş kodu istiyor. PS5'te bu kullanıcıyla giriş yapın ve yeniden deneyin.")
               2 -> retry(message ?: "Remote Play bağlantısı kesildi")
               3 -> finish(message ?: "PS5 oturumu kapattı")
@@ -166,11 +175,43 @@ class RemotePlayService : Service() {
   private fun retry(reason: String) {
     pipeline?.resetStream()
     closeStream()
-    if (attemptNumber >= 5) return finish(reason)
+    if (attemptNumber >= 5) return finish("PS5'e ${options?.host.orEmpty()} adresinden ulaşılamadı. $reason")
     val delay = 1000L shl attemptNumber++
     update { it.copy(console = "Bağlantı kesildi", session = "${delay / 1000} sn sonra yeniden bağlanıyor",
       video = "Bekliyor", ocr = "Görüntü bekleniyor", error = reason) }
     handler.postDelayed(reconnect, delay)
+    val config = options ?: return
+    status.consoleIdentity?.let { refreshConsoleAddress(config, it, streamToken) }
+  }
+
+  private fun refreshConsoleAddress(config: RemotePlayOptions, identity: String, token: Long) {
+    discoveryWorker.execute {
+      val address = runCatching {
+        matchingConsoleAddress(ConsoleDiscovery.scan(750), identity, config.host)
+      }.getOrNull() ?: return@execute
+      if (address == config.host) return@execute
+      handler.post {
+        if (token != streamToken || options !== config) return@post
+        options = config.copy(host = address)
+        update { it.copy(host = address) }
+      }
+    }
+  }
+
+  private fun identifyConnectedConsole(host: String, reference: String, token: Long) {
+    discoveryWorker.execute {
+      val identity = runCatching {
+        val directed = ConsoleDiscovery.scan(700, host).mapNotNull { it.identity }.distinct()
+        if (directed.isNotEmpty()) directed.singleOrNull()
+        else ConsoleDiscovery.scan(950).filter { it.host == host }.mapNotNull { it.identity }.distinct().singleOrNull()
+      }.getOrNull() ?: return@execute
+      handler.post {
+        if (token != streamToken) return@post
+        val verified = runCatching { ConsoleCredentials.confirmLegacyIdentity(applicationContext, reference, identity) }
+          .getOrNull() ?: return@post
+        update { it.copy(consoleIdentity = verified) }
+      }
+    }
   }
 
   private fun closeStream() {
@@ -248,15 +289,17 @@ class RemotePlayService : Service() {
     private const val ACTION_START = "ps5.remoteplay.START"
     private const val ACTION_STOP = "ps5.remoteplay.STOP"
 
+    private val discoveryWorker = Executors.newSingleThreadExecutor()
+
     @Volatile private var instance: RemotePlayService? = null
 
     @Volatile internal var status = RemotePlayStatus()
       private set
 
-    internal fun start(context: Context, host: String, keepWifiAwake: Boolean, rawOptions: String) {
+    internal fun start(context: Context, host: String, reference: String, keepWifiAwake: Boolean, rawOptions: String) {
       TranslationOptions.parse(rawOptions)
       val intent = Intent(context, RemotePlayService::class.java).setAction(ACTION_START)
-        .putExtra("host", host).putExtra("wifi", keepWifiAwake).putExtra("translation", rawOptions)
+        .putExtra("host", host).putExtra("pairing", reference).putExtra("wifi", keepWifiAwake).putExtra("translation", rawOptions)
       if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
     }
 
