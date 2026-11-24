@@ -27,7 +27,7 @@ internal fun smartOverlayChecks() {
     OcrLine("Brian", FrameRect(.33, .19, .08, .028), 0),
     OcrLine("Mandy's rent just came in.", FrameRect(.27, .255, .16, .025), 1),
     OcrLine("Mandy's rent just came in.", FrameRect(.271, .254, .159, .025), 3),
-    OcrLine("I knew you could pull it off.", FrameRect(.27, .284, .15, .025), 2),
+    OcrLine("I knew you could pull it off.", FrameRect(.27, .284, .15, .025), 1),
     OcrLine("New messages", FrameRect(.30, .43, .12, .028), 4),
   )
   val grouped = SmartOcr.group(messages)
@@ -50,7 +50,7 @@ internal fun smartOverlayChecks() {
     OverlayBox(5, "Crastenburg Oteli", FrameRect(.27, .565, .15, .029), 1700),
   )
   val arranged = TvOverlayLayout.arrange(boxes)
-  check(arranged.size >= 3 && arranged.any { it.id == 2L } && arranged.any { it.id == 4L })
+  check(arranged.size >= 3 && arranged.any { it.id == 2L } && arranged.any { it.id == 4L }) { arranged.toString() }
   check(arranged.all { it.rect.x >= 0 && it.rect.y >= 0 && it.rect.right <= 1 && it.rect.bottom <= 1 })
   check(arranged.indices.all { i -> (i + 1 until arranged.size).all { j -> arranged[i].rect.overlap(arranged[j].rect) == 0.0 } })
   check(TvOverlayLayout.arrange(boxes) == arranged)

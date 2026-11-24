@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import socket
+import statistics
 import subprocess
 import sys
 import time
@@ -201,20 +202,26 @@ async def main():
     await legacy.close()
 
     # stability: 90 s, 1 msg / 50 ms with an idle client relying on ping/pong
-    t0 = time.time()
+    t0 = time.monotonic()
     n = 0
     lost = 0
-    while time.time() - t0 < 90:
-        h.cmd(f"SEND uzun test {n}")
+    timings = []
+    while time.monotonic() - t0 < 90:
+        status, clients, queued_ns = h.cmd(f"TIMED uzun test {n}").split()
         try:
             m = json.loads(await recv(ws, 2))
-            if m["text"] != f"uzun test {n}":
+            if m["text"] != f"uzun test {n}" or (status, clients) != ("SENT", "1"):
                 lost += 1
+            else:
+                timings.append(int(queued_ns) / 1e6)
         except Exception:
             lost += 1
         n += 1
         await asyncio.sleep(0.05)
     check("90 s stability run", lost == 0 and n > 1000, f"{n} messages, {lost} lost")
+    if len(timings) >= 2:
+        print(f"Host WebSocket enqueue p50={statistics.median(timings):.3f} ms "
+              f"p95={statistics.quantiles(timings, n=100)[94]:.3f} ms")
     st = h.cmd("STATE")
     check("still 1 client after long run", "clients=1" in st, st)
 

@@ -7,12 +7,14 @@ import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.OverlayBox
 import expo.modules.ps5translator.core.OverlayMessage
 import expo.modules.ps5translator.core.OverlayTracker
+import expo.modules.ps5translator.core.TvOverlayLayout
 import expo.modules.ps5translator.core.GameGlossary
 import expo.modules.ps5translator.core.GlossaryEntry
 import expo.modules.ps5translator.core.cleanOcr
 
 fun main() {
   smartOverlayChecks()
+  stabilityChecks()
   val tracker = SubtitleTracker(300)
   check(!tracker.observe("Follow the lantern east.", 100))
   check(!tracker.observe("", 200))
@@ -36,7 +38,7 @@ fun main() {
   val moving = overlays.alive(550, 1000).first()
   check(overlays.seenInLatestFrame(moving))
   check(!overlays.seenInLatestFrame(overlays.alive(550, 1000).last()))
-  check(moving.id == originals.first().id && moving.rect.x in .11.. .13)
+  check(moving.id == originals.first().id && moving.rect == moved)
   check(overlays.alive(1100, 1000).size == 1)
   overlays.observe(listOf(DetectedText("Menu", moved)), 1200, 1000)
   check(overlays.alive(1200, 1000).single().let { it.id == moving.id && it.text == "Menu" })
@@ -70,9 +72,16 @@ fun main() {
         OverlayBox(1, "Görev \"başladı\"", rect, 1000),
         OverlayBox(2, "İkinci satır", moved.copy(y = .7), 2500),
       ))).toString()
+      "FIXMENU" -> OverlayMessage(1280, 720, TvOverlayLayout.arrange(menuFixture)).encode()
+      "FIXPHONE" -> OverlayMessage(1280, 720, TvOverlayLayout.arrange(phoneFixture)).encode()
       "CLEAROVERLAY" -> core.sendOverlay(OverlayMessage(1280, 720, emptyList())).toString()
       "SENDEMPTY" -> core.send("").let { "SEND ${it.status} ${it.clients}" }
       "FORCE" -> core.send(arg, force = true).let { "SEND ${it.status} ${it.clients}" }
+      "TIMED" -> {
+        val start = System.nanoTime()
+        val result = core.send(arg)
+        "${result.status} ${result.clients} ${System.nanoTime() - start}"
+      }
       "ALLOW" -> { core.setAllowedIp(arg.takeIf { it != "-" }); "ALLOWED" }
       "STATE" -> core.snapshot().let { "STATE running=${it.running} clients=${it.clients.size} sent=${it.sentCount} rejected=${it.rejectedCount} last=${it.lastSentText} err=${it.lastError}" }
       "QUIT" -> { core.stop(); println("BYE"); System.out.flush(); return }

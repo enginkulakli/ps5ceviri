@@ -1,3 +1,4 @@
+import expo.modules.ps5translator.core.BaselineV3Layout
 import expo.modules.ps5translator.core.BaselineOverlayTracker
 import expo.modules.ps5translator.core.DetectedText
 import expo.modules.ps5translator.core.FrameRect
@@ -19,7 +20,7 @@ private val phone = listOf(
   OcrLine("Brian", FrameRect(.33, .19, .08, .028), 0),
   OcrLine("Mandy's rent just came in.", FrameRect(.27, .255, .16, .025), 1),
   OcrLine("Mandy's rent just came in.", FrameRect(.271, .254, .159, .025), 3),
-  OcrLine("I knew you could pull it off.", FrameRect(.27, .284, .15, .025), 2),
+  OcrLine("I knew you could pull it off.", FrameRect(.27, .284, .15, .025), 1),
   OcrLine("New messages", FrameRect(.30, .43, .12, .028), 4),
 )
 private val translations = mapOf(
@@ -34,6 +35,9 @@ private val menuVariants = listOf(menu, menu.map { if (it.group == 1) it.copy(te
 fun main() {
   compare("static menu", List(1500) { menuVariants[it % 2] })
   compare("phone screen", List(1500) { phone })
+  compareLayout("menu backplates", menuFixture)
+  compareLayout("phone backplates", phoneFixture)
+  measureStaticCache()
 }
 
 private fun compare(label: String, frames: List<List<OcrLine>>) {
@@ -75,4 +79,40 @@ private fun compare(label: String, frames: List<List<OcrLine>>) {
 private fun percentiles(samples: List<Long>): String {
   val ordered = samples.sorted()
   return String.format(Locale.ROOT, "%.3f/%.3f ms", ordered[ordered.size / 2] / 1e6, ordered[ordered.size * 95 / 100] / 1e6)
+}
+
+private fun compareLayout(label: String, fixture: List<OverlayBox>) {
+  val before = BaselineV3Layout.arrange(fixture)
+  val after = TvOverlayLayout.arrange(fixture)
+  check(after.size == fixture.size)
+  val oldMax = before.maxOf { it.rect.w }
+  val newMax = after.maxOf { it.rect.w }
+  check(newMax < oldMax)
+  val baseline = ArrayList<Long>()
+  val fixed = ArrayList<Long>()
+  repeat(1800) { index ->
+    var start = System.nanoTime()
+    BaselineV3Layout.arrange(fixture)
+    if (index >= 300) baseline.add(System.nanoTime() - start)
+    start = System.nanoTime()
+    TvOverlayLayout.arrange(fixture)
+    if (index >= 300) fixed.add(System.nanoTime() - start)
+  }
+  val widths = String.format(Locale.ROOT, "%.1f%% → %.1f%%", oldMax * 100, newMax * 100)
+  println("$label — widest Android rectangle $widths; V3 layout p50/p95 ${percentiles(baseline)} → ${percentiles(fixed)}")
+}
+
+private fun measureStaticCache() {
+  val keys = SmartOcr.group(menu).map { it.text }
+  val cache = LinkedHashMap<String, String>(180, .75f, true)
+  keys.forEach { cache[it] = it }
+  val samples = ArrayList<Long>()
+  var misses = 0
+  repeat(11_000) { index ->
+    val start = System.nanoTime()
+    misses += keys.count { it !in cache }
+    if (index >= 1000) samples.add(System.nanoTime() - start)
+  }
+  check(misses == 0)
+  println("Static menu — ${keys.size} RAM keys per frame, p50/p95 ${percentiles(samples)}, $misses misses in 11,000 frames")
 }
