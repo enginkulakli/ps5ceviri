@@ -14,6 +14,7 @@ on:
       - fix/v3-console-management
       - feature/v3.2-stability
       - fix/v3.2.1-performance
+      - feature/v3.2.2-translation-modes
     paths:
       - 'frontend/**'
       - 'tests/native/**'
@@ -97,7 +98,7 @@ jobs:
             fi
             sleep 15
           done
-      - name: Verify OCR, text tracking, LAN proofs, and saved consoles
+      - name: Verify OCR modes, region geometry, LAN proofs, and saved consoles
         run: |
           compiler=$(find "${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists" -type f -name 'kotlin-compiler-embeddable-*.jar' -printf '%h\n' -quit)
           cache="${GRADLE_USER_HOME:-$HOME/.gradle}/caches/modules-2/files-2.1"
