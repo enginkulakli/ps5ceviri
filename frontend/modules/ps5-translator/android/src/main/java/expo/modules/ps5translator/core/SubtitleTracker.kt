@@ -80,8 +80,18 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
 private fun looksLikeOcrJitter(current: String, incoming: String, reliable: Boolean): Boolean {
   if (current.replace("rn", "m") == incoming.replace("rn", "m")) return true
   if (reliable || current.length != incoming.length) return false
-  val changed = current.indices.filter { current[it] != incoming[it] }.singleOrNull() ?: return false
-  return current[changed].isLowerCase() && incoming[changed].isLowerCase() &&
+  var changed = -1
+  for (i in current.indices) {
+    if (current[i] == incoming[i]) continue
+    if (changed != -1) return false
+    changed = i
+  }
+  if (changed < 0) return false
+  val a = current[changed]
+  val b = incoming[changed]
+  // Preserve the observed low-confidence n/h misread without treating every
+  // single-letter edit as unstable (for example, "wide path" and "side path").
+  return ((a == 'n' && b == 'h') || (a == 'h' && b == 'n')) &&
     (current.getOrNull(changed - 1)?.isLowerCase() == true || current.getOrNull(changed + 1)?.isLowerCase() == true)
 }
 

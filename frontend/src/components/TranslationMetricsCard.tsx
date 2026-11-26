@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Share, Text } from "react-native";
 
 import { Button, Card, Notice } from "@/src/components/ui";
@@ -18,9 +18,18 @@ export function TranslationMetricsCard() {
   const styles = useStyles();
   const [metrics, setMetrics] = useState<Record<string, { samples: number; lastMs: number; p50Ms: number; p95Ms: number }>>({});
   const [error, setError] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<boolean | null>(null);
   const [diagnosticError, setDiagnosticError] = useState(false);
-  const diagnosticAvailable = hasNative("getScreenOcrDiagnostics") && hasNative("setScreenOcrDiagnostics");
+  const diagnosticAvailable = hasNative("getScreenOcrDiagnostics") && hasNative("setScreenOcrDiagnostics") &&
+    hasNative("isScreenOcrDiagnosticsEnabled");
+  useEffect(() => {
+    if (!diagnosticAvailable) return;
+    let active = true;
+    nativeModule!.isScreenOcrDiagnosticsEnabled().then(enabled => {
+      if (active) setDiagnostics(enabled);
+    }).catch(() => { if (active) setDiagnosticError(true); });
+    return () => { active = false; };
+  }, [diagnosticAvailable]);
   return <Card>
     <Button label="Ölçümleri yenile" variant="secondary" disabled={!hasNative("getTranslationMetrics")} onPress={async () => {
       try { setMetrics(JSON.parse(await nativeModule!.getTranslationMetrics())); setError(false); }
@@ -33,7 +42,7 @@ export function TranslationMetricsCard() {
     <Text style={styles.detail}>TV ekranda çizim bildirimi göndermediği için son ölçüm Android’in gönderim kuyruğunda biter.</Text>
     {error ? <Notice kind="error" text="Ölçümler okunamadı." /> : null}
     <Button label={diagnostics ? "OCR tanılamasını kapat" : "Tam ekran OCR tanılamasını aç"}
-      variant="secondary" disabled={!diagnosticAvailable} onPress={async () => {
+      variant="secondary" disabled={!diagnosticAvailable || diagnostics === null} onPress={async () => {
         try { await nativeModule!.setScreenOcrDiagnostics(!diagnostics); setDiagnostics(!diagnostics); setDiagnosticError(false); }
         catch { setDiagnosticError(true); }
       }} />

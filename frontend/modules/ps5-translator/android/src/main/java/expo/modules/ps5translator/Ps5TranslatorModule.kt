@@ -216,6 +216,7 @@ class Ps5TranslatorModule : Module() {
     AsyncFunction("getTranslationMetrics") { TranslationMetrics.snapshot().toString() }
     AsyncFunction("setScreenOcrDiagnostics") { enabled: Boolean -> ScreenOcrDiagnostics.configure(enabled) }
     AsyncFunction("getScreenOcrDiagnostics") { ScreenOcrDiagnostics.snapshot() }
+    AsyncFunction("isScreenOcrDiagnosticsEnabled") { ScreenOcrDiagnostics.enabled }
 
     AsyncFunction("getArchiveOverview") { promise: Promise ->
       val db = TranslationArchive.get(context)

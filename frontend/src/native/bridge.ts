@@ -88,6 +88,7 @@ export interface Ps5TranslatorNativeModule {
   getTranslationMetrics(): Promise<string>;
   setScreenOcrDiagnostics(enabled: boolean): Promise<void>;
   getScreenOcrDiagnostics(): Promise<string>;
+  isScreenOcrDiagnosticsEnabled(): Promise<boolean>;
   getArchiveOverview(): Promise<string>;
   createArchiveGame(name: string): Promise<string>;
   getArchivePage(game: string, search: string, before: number): Promise<string>;
