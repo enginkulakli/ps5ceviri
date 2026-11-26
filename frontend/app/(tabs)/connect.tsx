@@ -11,7 +11,7 @@ import { Button, Card, Field, Notice, SectionTitle, StatusBadge } from "@/src/co
 import { fonts, radius, space } from "@/src/fonts";
 import { usesNativeTabs } from "@/src/navigation";
 import { hasNative, nativeModule, NATIVE_REQUIRED_MESSAGE, Ps5TranslatorNativeModule } from "@/src/native/bridge";
-import { applyConsoleDiscovery, changeConsoleAddress, credentialSlot, mergeByConsoleIdentity,
+import { changeConsoleAddress, credentialSlot, mergeByConsoleIdentity,
   nextConsoleId, validConsoleAddress } from "@/src/native/consoleRecords";
 import { useRemotePlay } from "@/src/native/RemotePlayProvider";
 import { PSN_ACCOUNT_KEY, useSettings } from "@/src/settings";
@@ -31,7 +31,7 @@ export default function ConnectScreen() {
   const { width } = useWindowDimensions();
   const wide = width >= 900;
   const { settings, ready, update } = useSettings();
-  const { status } = useRemotePlay();
+  const { status, discoverConsoles, discoveryError } = useRemotePlay();
   const operation = useRef(false);
 
   const [tabletIp, setTabletIp] = useState<string | null>(null);
@@ -111,18 +111,14 @@ export default function ConnectScreen() {
   };
 
   const discover = useCallback(() => needNative("discover", setPsMsg, async () => {
-    const found = await nativeModule!.discoverConsoles(3000);
-    if (!found.length) throw new Error("PS5 bulunamadı. Konsolun açık ve tabletle aynı yerel ağda olduğunu kontrol edin.");
-    const identities = [...new Set(found.flatMap(console => console.identity ? [console.identity] : []))];
-    const results = await Promise.allSettled(identities.map(identity => nativeModule!.getConsolePairing("mac-" + identity)));
-    const pairings = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
-    update(current => applyConsoleDiscovery(current, found, pairings));
+    await discoverConsoles();
     return "Ağdaki PS5 kayıtları güncellendi.";
-  }, "getConsolePairing"), [needNative, update]);
+  }, "discoverConsoles"), [discoverConsoles, needNative]);
 
+  const hasSavedConsoles = settings.consoles.some(console => console.registered);
   useFocusEffect(useCallback(() => {
-    if (ready && hasNative("discoverConsoles") && hasNative("getConsolePairing")) void discover();
-  }, [ready, discover]));
+    if (ready && !hasSavedConsoles && hasNative("discoverConsoles")) void discover();
+  }, [ready, hasSavedConsoles, discover]));
 
   const saveIp = () => {
     if (!ipEdit || status?.active || operation.current) return;
@@ -228,7 +224,8 @@ export default function ConnectScreen() {
             }));
             return "Eşleştirme tamamlandı. Durum sekmesinden çeviriyi başlatabilirsiniz.";
           }, "registerConsole")} />
-        {psMsg ? <Notice kind={psMsg.kind} text={psMsg.text} testID="ps5-message" /> : null}
+        {psMsg ? <Notice kind={psMsg.kind} text={psMsg.text} testID="ps5-message" /> :
+          discoveryError ? <Notice kind="warning" text={discoveryError} testID="ps5-discovery-message" /> : null}
       </Card>
     </View>
   );

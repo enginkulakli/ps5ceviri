@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 
 import { hasNative, nativeModule, type RemotePlayStatus } from "@/src/native/bridge";
-import { applyPairingRecords, credentialSlot, mergeByConsoleIdentity } from "@/src/native/consoleRecords";
+import { applyConsoleDiscovery, applyPairingRecords, credentialSlot, mergeByConsoleIdentity } from "@/src/native/consoleRecords";
 import { useSettings } from "@/src/settings";
 import { useTvServer } from "@/src/tv/TvServerProvider";
 
@@ -11,6 +11,8 @@ const RemotePlayContext = createContext<{
   busy: boolean;
   error: string | null;
   toggle: () => Promise<void>;
+  discoverConsoles: () => Promise<void>;
+  discoveryError: string | null;
 } | null>(null);
 
 export function RemotePlayProvider({ children }: { children: ReactNode }) {
@@ -19,6 +21,9 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<RemotePlayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const discovery = useRef<Promise<void> | null>(null);
+  const hasSavedConsoles = settings.consoles.some(console => console.registered);
   const { mode, engine, ocrRegion, exclusions, ocrIntervalMs, clearDelayMs, minimumVisibleMs,
     sensitivity, confirmations, glossary, gameId, generalArchive, shareEngines, dailyCharacters, monthlyCharacters } = settings;
   const settingsJson = useMemo(() => JSON.stringify({
@@ -73,6 +78,33 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
     return () => { alive = false; };
   }, [ready, settings.consoles, update]);
 
+  const discoverConsoles = useCallback(() => {
+    if (discovery.current) return discovery.current;
+    const bridge = nativeModule;
+    if (!bridge || !hasNative("discoverConsoles") || !hasNative("getConsolePairing")) return Promise.resolve();
+    setDiscoveryError(null);
+    discovery.current = (async () => {
+      const found = await bridge.discoverConsoles(3000);
+      if (!found.length) throw new Error("Ağda PS5 bulunamadı. Konsolun açık ve aynı yerel ağda olduğunu kontrol edin.");
+      const identities = [...new Set(found.flatMap(console => console.identity ? [console.identity] : []))];
+      const results = await Promise.allSettled(identities.map(identity => bridge.getConsolePairing("mac-" + identity)));
+      const pairings = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+      update(current => applyConsoleDiscovery(current, found, pairings));
+    })().catch(cause => {
+      setDiscoveryError(cause instanceof Error ? cause.message : "PS5 ağ araması tamamlanamadı.");
+      throw cause;
+    }).finally(() => { discovery.current = null; });
+    return discovery.current;
+  }, [update]);
+
+  useEffect(() => {
+    if (!ready || !hasSavedConsoles) return;
+    const search = () => void discoverConsoles().catch(() => {});
+    if (AppState.currentState !== "background") search();
+    const subscription = AppState.addEventListener("change", state => { if (state === "active") search(); });
+    return () => subscription.remove();
+  }, [ready, hasSavedConsoles, discoverConsoles]);
+
   const { host, pairingReference, consoleIdentity } = status ?? {};
   useEffect(() => {
     if (!ready || !host || !pairingReference || !consoleIdentity) return;
@@ -107,7 +139,7 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <RemotePlayContext.Provider value={{ status, busy, error, toggle }}>{children}</RemotePlayContext.Provider>;
+  return <RemotePlayContext.Provider value={{ status, busy, error, toggle, discoverConsoles, discoveryError }}>{children}</RemotePlayContext.Provider>;
 }
 
 export function useRemotePlay() {
