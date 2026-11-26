@@ -124,6 +124,8 @@ export default function SettingsScreen() {
             Altyazı alanı: üstten %{Math.round(s.ocrRegion.y * 100)}, yükseklik %{Math.round(s.ocrRegion.h * 100)} · düzenlemek için dokunun
           </Text>
         </Pressable>
+        <Button testID="open-live-region-editor" label="Alanı Düzenle" variant="secondary"
+          onPress={() => router.push({ pathname: "/ocr-region", params: { edit: "1" } })} />
         <Stepper testID="ocr-interval" label="OCR kontrol sıklığı" display={`${s.ocrIntervalMs} ms`}
           onDec={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs - 50, 50, 2000) })} onInc={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs + 50, 50, 2000) })} />
         <Stepper testID="ocr-sensitivity" label="Algılama hassasiyeti" display={`%${Math.round(s.sensitivity * 100)}`}

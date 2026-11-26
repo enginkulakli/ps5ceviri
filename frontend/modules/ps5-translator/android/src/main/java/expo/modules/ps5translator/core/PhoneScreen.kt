@@ -112,7 +112,12 @@ internal class PhoneScreen {
     // changed conversation does not veto a settled message region.
     val moving = if (probe == null) dirty else current.changes(probe)
     val settled = dirty - moving
-    val unstable = dirty.size >= 34 && moving.size >= 34
+    var movedMessages = 0
+    messages = messages.map { message ->
+      if (current.regionKey(message.rect) == message.imageKey) message.copy(verifiedAt = now)
+      else { movedMessages++; message }
+    }
+    val unstable = dirty.size >= 34 && moving.size >= 34 && (messages.isEmpty() || movedMessages > 0)
     unreliableSince = if (unstable) unreliableSince ?: now else null
     val fullAllowed = lastFullAt == Long.MIN_VALUE || now - lastFullAt >= FULL_SCAN_SPACING_MS
     if (fullAllowed && unreliableSince?.let { now - it >= FULL_SCAN_SPACING_MS } == true) {

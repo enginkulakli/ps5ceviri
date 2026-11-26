@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { containFrame, DEFAULT_SUBTITLE_REGION, dragRegion, MIN_REGION_SIDE, pixelCrop, projectCrop } from "../../frontend/src/native/regionGeometry.ts";
+import { containFrame, DEFAULT_SUBTITLE_REGION, dragRegion, MIN_REGION_SIDE, pixelCrop, projectCrop, projectExclusion } from "../../frontend/src/native/regionGeometry.ts";
 
 const selected = { x: .157, y: .723, w: .7, h: .215 };
 const near = (actual, expected) => assert(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`);
@@ -51,4 +51,11 @@ test("supports independent draft coordinates, normalized serialization and the e
   assert.deepEqual(JSON.parse(JSON.stringify(draft)), draft);
   assert.deepEqual(selected, { x: .157, y: .723, w: .7, h: .215 });
   assert.deepEqual(pixelCrop(DEFAULT_SUBTITLE_REGION, 1280, 720), {x:0,y:518,w:1280,h:200});
+});
+
+test("shows only the part of an existing exclusion that the native crop masks", () => {
+  const view = containFrame(1280, 720, 1280, 720);
+  const crop = projectCrop(DEFAULT_SUBTITLE_REGION, view, 1280, 720);
+  assert.deepEqual(projectExclusion({x:.8,y:.7,w:.2,h:.3}, view, crop, 1280, 720), {x:1024,y:518,w:256,h:200});
+  assert.equal(projectExclusion({x:.1,y:.05,w:.1,h:.1}, view, crop, 1280, 720).h, 0);
 });

@@ -7,7 +7,7 @@ import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button } from "@/src/components/ui";
 import { fonts, space } from "@/src/fonts";
 import { hasNative, nativeModule, type OcrRegion } from "@/src/native/bridge";
-import { containFrame, DEFAULT_SUBTITLE_REGION, dragRegion, projectCrop, type RegionHandle } from "@/src/native/regionGeometry";
+import { containFrame, DEFAULT_SUBTITLE_REGION, dragRegion, projectCrop, projectExclusion, type RegionHandle } from "@/src/native/regionGeometry";
 import { makeStyles } from "@/src/theme";
 
 const handles = [
@@ -17,8 +17,9 @@ const handles = [
 const size = 36;
 const position = ({ x, y, w, h }: OcrRegion): ViewStyle => ({ left: x, top: y, width: w, height: h });
 
-export function RemoteRegionEditor({ initial, onSave, onCancel }: {
+export function RemoteRegionEditor({ initial, exclusions, onSave, onCancel }: {
   initial: OcrRegion;
+  exclusions: OcrRegion[];
   onSave: (region: OcrRegion) => void;
   onCancel: () => void;
 }) {
@@ -37,6 +38,8 @@ export function RemoteRegionEditor({ initial, onSave, onCancel }: {
   const sourceHeight = frame?.height ?? 720;
   const viewport = containFrame(stage.width, stage.height, sourceWidth, sourceHeight);
   const box = projectCrop(draft, viewport, sourceWidth, sourceHeight);
+  const masks = exclusions.map(area => projectExclusion(area, viewport, box, sourceWidth, sourceHeight));
+  const hit = Math.min(size, Math.max(14, Math.min(box.w, box.h) * .45));
   dimensions.current = viewport;
 
   const capture = useCallback(async () => {
@@ -99,9 +102,11 @@ export function RemoteRegionEditor({ initial, onSave, onCancel }: {
             ))}
             <View testID="region-editor-selection" accessibilityLabel="Altyazı alanını taşı"
               style={[styles.selection, position(box)]} {...responders.move} />
+            {masks.map((mask, i) => mask.w > 0 && mask.h > 0 ?
+              <View key={i} pointerEvents="none" style={[styles.exclusion, position(mask)]} /> : null)}
             {handles.map(([handle, x, y], i) => (
               <View key={handle} testID={`region-editor-handle-${handle}`} style={[styles.handle, {
-                left: box.x + box.w * x - size / 2, top: box.y + box.h * y - size / 2,
+                left: box.x + box.w * x - hit / 2, top: box.y + box.h * y - hit / 2, width: hit, height: hit,
               }]} {...responders.edges[i]}>
                 <View pointerEvents="none" style={styles.dot} />
               </View>
@@ -129,7 +134,8 @@ const useStyles = makeStyles(c => ({
   image: { width: "100%", height: "100%" },
   shade: { position: "absolute", backgroundColor: "rgba(0,0,0,.58)" },
   selection: { position: "absolute", borderWidth: 2, borderColor: c.brandPrimary, backgroundColor: "rgba(100,150,250,.14)" },
-  handle: { position: "absolute", width: size, height: size, alignItems: "center", justifyContent: "center" },
+  exclusion: { position: "absolute", borderColor: c.error, borderWidth: 1, backgroundColor: c.error + "44" },
+  handle: { position: "absolute", alignItems: "center", justifyContent: "center" },
   dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: c.surface, backgroundColor: c.brandPrimary },
   help: { fontFamily: fonts.text, color: c.muted, textAlign: "center" },
   actions: { flexDirection: "row", justifyContent: "center", flexWrap: "wrap", gap: space.sm },

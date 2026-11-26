@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocalSearchParams } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -27,7 +28,8 @@ export default function OcrRegionScreen() {
   const insets = useSafeAreaInsets();
   const { settings, update } = useSettings();
   const r = settings.ocrRegion;
-  const [editing, setEditing] = useState(false);
+  const { edit } = useLocalSearchParams<{ edit?: string }>();
+  const [editing, setEditing] = useState(edit === "1");
   const [selected, setSelected] = useState(0);
   const areas = settings.exclusions;
   const index = Math.min(selected, areas.length - 1);
@@ -92,7 +94,7 @@ export default function OcrRegionScreen() {
           </> : null}
         </Card>
       </ScrollView>
-      {editing ? <RemoteRegionEditor initial={r} onCancel={() => setEditing(false)}
+      {editing ? <RemoteRegionEditor initial={r} exclusions={areas} onCancel={() => setEditing(false)}
         onSave={next => { update({ ocrRegion: next }); setEditing(false); }} /> : null}
     </View>
   );

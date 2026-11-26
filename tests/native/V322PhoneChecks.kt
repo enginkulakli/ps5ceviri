@@ -7,7 +7,7 @@ import expo.modules.ps5translator.core.TvOverlayLayout
 import expo.modules.ps5translator.core.memoryText
 import expo.modules.ps5translator.core.pixelCrop
 
-private fun picture(vararg rows: FrameRect, cursor: Boolean = false, variant: Boolean = false): PhoneSignature =
+private fun picture(vararg rows: FrameRect, cursor: Boolean = false, variant: Int = 0, protectPhone: Boolean = false): PhoneSignature =
   PhoneSignature.sample(960, 540) { x, y ->
     val px = x / 960.0
     val py = y / 540.0
@@ -15,7 +15,7 @@ private fun picture(vararg rows: FrameRect, cursor: Boolean = false, variant: Bo
     when {
       text && ((x / 10 + y / 13) % 3 != 0) -> 209
       cursor && x in 500..510 && y in 260..271 -> 255
-      variant && (x / 10 + y / 13) % 3 != 0 -> 170
+      variant != 0 && (!protectPhone || px < .63) -> if ((x / 10 + y / 13 + variant) % 2 == 0) 216 else 4
       else -> 46
     }
   }
@@ -78,11 +78,19 @@ fun main() {
   replacement.observe(checkNotNull(replacement.inspect(seed, 0)), listOf(first), 0)
   var fallback: PhoneScreen.Scan? = null
   for (i in 1..16) {
-    val busy = if (i % 2 == 1) picture(variant = true) else picture(top.copy(x = .43), variant = true)
+    val busy = if (i % 2 == 1) picture(variant = 1) else picture(variant = 2)
     fallback = replacement.inspect(busy, i * 450L)
     if (fallback != null) break
   }
   check(fallback?.full == true)
+  // A moving gameplay background must not cause recurring full-frame OCR if
+  // the tracked phone message itself still has the same appearance.
+  val movingBackground = PhoneScreen()
+  movingBackground.observe(checkNotNull(movingBackground.inspect(initial, 0)), listOf(first), 0)
+  for (i in 1..22) {
+    check(movingBackground.inspect(picture(top, variant = i % 2 + 1, protectPhone = true), i * 450L) == null)
+  }
+  check(movingBackground.visible().single().verifiedAt == 22 * 450L)
   phone.clear()
   check(phone.visible().isEmpty() && checkNotNull(phone.inspect(initial, 32_000)).full)
 

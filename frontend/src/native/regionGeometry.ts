@@ -42,3 +42,15 @@ export function projectCrop(region: OcrRegion, viewport: OcrRegion, sourceWidth:
     h: pixels.h / sourceHeight * viewport.h,
   };
 }
+
+export function projectExclusion(
+  exclusion: OcrRegion, viewport: OcrRegion, selection: OcrRegion, sourceWidth: number, sourceHeight: number,
+): OcrRegion {
+  const toX = (fraction: number) => viewport.x + Math.trunc(fraction * sourceWidth) / sourceWidth * viewport.w;
+  const toY = (fraction: number) => viewport.y + Math.trunc(fraction * sourceHeight) / sourceHeight * viewport.h;
+  const x = Math.max(selection.x, toX(exclusion.x));
+  const y = Math.max(selection.y, toY(exclusion.y));
+  const w = Math.max(0, Math.min(selection.x + selection.w, toX(exclusion.x + exclusion.w)) - x);
+  const h = Math.max(0, Math.min(selection.y + selection.h, toY(exclusion.y + exclusion.h)) - y);
+  return { x, y, w, h };
+}
