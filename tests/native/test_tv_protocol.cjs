@@ -22,7 +22,9 @@ async function run(cp, tvScripts) {
   const events = new Map();
   const elements = new Map();
   const element = (id) => {
+    const classes = new Set();
     if (!elements.has(id)) elements.set(id, {
+      classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
       textContent: "", value: "", style: {}, ownerDocument: document, offsetHeight: 25,
       clientWidth: 1920, clientHeight: 1080, children: [],
       addEventListener(kind, fn) { events.set(id + ":" + kind, fn); },
@@ -56,7 +58,7 @@ async function run(cp, tvScripts) {
     element("tabletIp").value = "127.0.0.1";
     element("tabletPort").value = String(port);
     events.get("connect:click")();
-    await until(() => element("connectionStatus").textContent === "Tablete bağlandı.");
+    await until(() => element("connectionStatus").textContent === "Cihaza bağlandı.");
     await wait(100);
     const shown = element("subtitle");
     const layer = element("textOverlay");
@@ -80,6 +82,10 @@ async function run(cp, tvScripts) {
     await until(() => layer.children.length === 2 && shown.textContent === "");
     assert.equal(await command("STOP"), "STOPPED");
     await until(() => shown.textContent === "" && layer.children.length === 0);
+    assert.equal(await command("START " + port + " -"), "START OK");
+    await until(() => element("connectionStatus").textContent === "Cihaza bağlandı.");
+    assert.equal(await command("TTL 900 Bağlantı yeniden kuruldu"), "SEND SENT 1");
+    await until(() => shown.textContent === "Bağlantı yeniden kuruldu");
     document.hidden = true;
     events.get("visibilitychange")();
   } finally {
@@ -90,5 +96,5 @@ async function run(cp, tvScripts) {
 const [cp, tvScripts] = process.argv.slice(2);
 if (!cp || !tvScripts) throw new Error("Usage: node test_tv_protocol.cjs <harness-classpath> <Tizen-js-directory>");
 run(cp, tvScripts).then(() => {
-  console.log("V3 Kotlin WebSocket server and V2 TV client over TCP: PASS");
+  console.log("Kotlin WebSocket server and Tizen client over TCP (including reconnect): PASS");
 }).catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-"""Render Android snapshots with the unchanged TV client in desktop Chromium."""
+"""Render Android snapshots with the TV client in desktop Chromium."""
 
 import json
 import os
@@ -39,7 +39,7 @@ def main(classpath, tv_root):
                 const style = getComputedStyle(node);
                 return {
                   x: b.left, y: b.top, w: b.width, h: b.height,
-                  backplate: style.backgroundColor, text: node.textContent,
+                  backplate: style.backgroundColor, text: node.textContent, visible: style.visibility === "visible",
                 };
               });
               overlay.clear();
@@ -54,6 +54,7 @@ def main(classpath, tv_root):
         assert next(box for box in menu_boxes if box["text"] == "Harita")["w"] < 192
         for boxes in (menu_boxes, phone_boxes):
             for i, box in enumerate(boxes):
+                assert box["visible"], box
                 assert box["backplate"].startswith("rgba(0, 0, 0")
                 assert box["x"] >= 0 and box["x"] + box["w"] <= 1921
                 assert box["y"] >= 0 and box["y"] + box["h"] <= 1081
@@ -62,7 +63,7 @@ def main(classpath, tv_root):
                     height = min(box["y"] + box["h"], other["y"] + other["h"]) - max(box["y"], other["y"])
                     assert width <= 1 or height <= 1, (box, other)
         assert next(box for box in phone_boxes if box["text"].startswith("Mandy"))["h"] > 35
-    print("Unchanged TV JavaScript/CSS in desktop Chromium: 2 scenes × 4 font sizes without backplate overlap")
+    print("TV JavaScript/CSS in desktop Chromium: 2 scenes × 4 font sizes without backplate overlap")
 
 
 if __name__ == "__main__":

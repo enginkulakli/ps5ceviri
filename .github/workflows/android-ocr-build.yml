@@ -15,6 +15,7 @@ on:
       - feature/v3.2-stability
     paths:
       - 'frontend/**'
+      - 'tests/native/**'
       - 'third_party/chiaki-ng'
       - '.gitmodules'
       - '.github/workflows/android-ocr-build.yml'
@@ -95,6 +96,15 @@ jobs:
             fi
             sleep 15
           done
+      - name: Verify OCR, text tracking, LAN proofs, and saved consoles
+        run: |
+          compiler=$(find "${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists" -type f -name 'kotlin-compiler-embeddable-*.jar' -printf '%h\n' -quit)
+          cache="${GRADLE_USER_HOME:-$HOME/.gradle}/caches/modules-2/files-2.1"
+          socket=$(find "$cache/org.java-websocket/Java-WebSocket/1.6.0" -type f -name 'Java-WebSocket-1.6.0.jar' -print -quit)
+          stdlib=$(find "$compiler" -maxdepth 1 -name 'kotlin-stdlib-*.jar' -print -quit)
+          logging=$(find "$compiler" -maxdepth 1 -name 'slf4j-api-*.jar' -print -quit)
+          test -f "$socket" && test -f "$stdlib" && test -f "$logging"
+          KOTLIN_COMPILER_DIR="$compiler" NATIVE_TEST_CLASSPATH="$stdlib:$socket:$logging" bash tests/native/run_core_checks.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ps5ceviri-standalone-arm64-apk
