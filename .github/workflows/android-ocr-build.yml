@@ -12,6 +12,7 @@ on:
       - feature/v3-smart-translation
       - fix/v3-translation-stability
       - fix/v3-console-management
+      - feature/v3.2-stability
     paths:
       - 'frontend/**'
       - 'third_party/chiaki-ng'
