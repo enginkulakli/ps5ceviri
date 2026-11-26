@@ -4,6 +4,7 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
   private var count = 0
   private var candidate = ""
   private var candidateAt = 0L
+  private var candidateJitter = false
   var text = ""
     private set
   var seenAt = 0L
@@ -21,14 +22,23 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     count = if (normalized == candidate && now - candidateAt <= maxOf(1400, intervalMs * 2 + 200)) count + 1 else 1
     candidate = normalized
     candidateAt = now
-    val looksCorrupted = text.length >= 12 && looksLikeOcrJitter(text, normalized)
-    // Explicit stricter settings still require all their observations.
-    if (count < confirmations && !(confirmations == 2 && reliable && !looksCorrupted)) return false
+    candidateJitter = text.length >= 12 && looksLikeOcrJitter(text, normalized, reliable) && count < 2
+    if (candidateJitter) {
+      seenAt = now
+      return false
+    }
+    // Confirmation controls presentation. A plausible candidate may start translating now.
+    if (count < confirmations && !(confirmations == 2 && reliable)) return false
     text = normalized
     seenAt = now
     candidate = ""
     count = 0
     return true
+  }
+
+  fun translationSource(now: Long, ttl: Long): String {
+    if (candidate.isNotEmpty() && !candidateJitter && now - candidateAt < ttl) return candidate
+    return text.takeIf { now - seenAt < ttl }.orEmpty()
   }
 
   fun recentlyRead(now: Long) =
@@ -49,12 +59,12 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
   }
 }
 
-private fun looksLikeOcrJitter(current: String, incoming: String): Boolean {
+private fun looksLikeOcrJitter(current: String, incoming: String, reliable: Boolean): Boolean {
   if (current.replace("rn", "m") == incoming.replace("rn", "m")) return true
-  if (current.length != incoming.length) return false
+  if (reliable || current.length != incoming.length) return false
   val changed = current.indices.filter { current[it] != incoming[it] }.singleOrNull() ?: return false
-  return changed in 1 until current.lastIndex && current[changed - 1].isLowerCase() &&
-    current[changed + 1].isLowerCase() && current[changed].isLowerCase() && incoming[changed].isLowerCase()
+  return current[changed].isLowerCase() && incoming[changed].isLowerCase() &&
+    (current.getOrNull(changed - 1)?.isLowerCase() == true || current.getOrNull(changed + 1)?.isLowerCase() == true)
 }
 
 internal data class SubtitleCaption(val source: String, val text: String, val shownAt: Long,

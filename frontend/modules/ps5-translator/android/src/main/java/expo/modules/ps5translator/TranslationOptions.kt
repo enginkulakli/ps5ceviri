@@ -32,7 +32,7 @@ internal data class TranslationOptions(
         EngineId.entries.find { it.key == doc.optString("engine") } ?: EngineId.OFFLINE,
         SubtitleRegion(area.x, area.y, area.w, area.h),
         (0 until minOf(exclusions?.length() ?: 0, 8)).mapNotNull { exclusions?.optJSONObject(it)?.rect() },
-        doc.optLong("intervalMs", 300).coerceIn(150, 2000),
+        doc.optLong("intervalMs", 300).coerceIn(50, 2000),
         doc.optLong("ttlMs", 2000).coerceIn(500, 10000),
         doc.optLong("minimumMs", 700).coerceIn(0, 3000),
         doc.optDouble("sensitivity", .5).takeIf(Double::isFinite)?.coerceIn(0.0, 1.0) ?: .5,

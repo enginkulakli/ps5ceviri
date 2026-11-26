@@ -167,7 +167,7 @@ internal class RemoteSubtitlePipeline(
       } else {
         val reading = subtitleText(task.result, frame.width, frame.height, now)
         val changed = tracker.observe(reading?.text.orEmpty(), now, reliable = reading?.reliable == true)
-        rememberDetections(listOfNotNull(tracker.text.takeIf(String::isNotEmpty)), comparison)
+        rememberDetections(listOf(tracker.text, tracker.translationSource(now, options.ttlMs)).filter(String::isNotEmpty), comparison)
         update { it.copy(ocr = if (reading == null) "Altyazı aranıyor" else "Altyazı okunuyor",
           english = if (changed) tracker.text else it.english) }
       }
@@ -273,7 +273,8 @@ internal class RemoteSubtitlePipeline(
     }
     tracker.expire(now, options.ttlMs)
     val source = tracker.text
-    if (source.isNotEmpty()) requestTranslations(listOf(source to source), now)
+    val requested = tracker.translationSource(now, options.ttlMs)
+    if (requested.isNotEmpty()) requestTranslations(listOf(requested to requested), now)
     val translated = cache[source]
     val previous = caption
     val shown = SubtitleCaption.select(previous, source, translated, tracker.seenAt,
@@ -332,7 +333,7 @@ internal class RemoteSubtitlePipeline(
         }
         val stillVisible = if (fullScreen) overlay.alive(SystemClock.elapsedRealtime(), screenTtl)
           .any { overlay.seenInLatestFrame(it) && it.normalized == normalized }
-          else tracker.text == normalized && SystemClock.elapsedRealtime() - tracker.seenAt < options.ttlMs
+          else tracker.translationSource(SystemClock.elapsedRealtime(), options.ttlMs) == normalized
         if (!modelReady || !stillVisible) {
           inFlight.finish(normalized, attempt)
           if (!modelReady) failed[normalized] = SystemClock.elapsedRealtime() + 1000

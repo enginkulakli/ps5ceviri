@@ -122,7 +122,7 @@ export default function SettingsScreen() {
           </Text>
         </Pressable>
         <Stepper testID="ocr-interval" label="OCR kontrol sıklığı" display={`${s.ocrIntervalMs} ms`}
-          onDec={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs - 50, 150, 2000) })} onInc={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs + 50, 150, 2000) })} />
+          onDec={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs - 50, 50, 2000) })} onInc={() => update({ ocrIntervalMs: clamp(s.ocrIntervalMs + 50, 50, 2000) })} />
         <Stepper testID="ocr-sensitivity" label="Algılama hassasiyeti" display={`%${Math.round(s.sensitivity * 100)}`}
           onDec={() => update({ sensitivity: clamp(Math.round((s.sensitivity - 0.1) * 10) / 10, 0, 1) })} onInc={() => update({ sensitivity: clamp(Math.round((s.sensitivity + 0.1) * 10) / 10, 0, 1) })} />
         <Stepper testID="repeat-window" label="Manuel testte tekrar engelleme" display={`${(s.repeatWindowMs / 1000).toFixed(1)} sn`}
