@@ -141,7 +141,8 @@ internal class RemoteSubtitlePipeline(
     ocrBusy = true
     val request = scanEpoch
     val ocrStarted = System.nanoTime()
-    val input = InputImage.fromByteArray(frame.nv21, frame.width, frame.height, 0, InputImage.IMAGE_FORMAT_NV21)
+    val recognition = if (fullScreen) frame.enlargeForText() else frame
+    val input = InputImage.fromByteArray(recognition.nv21, recognition.width, recognition.height, 0, InputImage.IMAGE_FORMAT_NV21)
     recognizer.process(input).addOnCompleteListener(callbackExecutor) { task ->
       ocrBusy = false
       if (closed || request != scanEpoch) return@addOnCompleteListener
@@ -155,7 +156,7 @@ internal class RemoteSubtitlePipeline(
       if (fullScreen) {
         videoWidth = frame.width
         videoHeight = frame.height
-        val detected = screenText(task.result, frame.width, frame.height)
+        val detected = screenText(task.result, recognition.width, recognition.height)
         val luminance = OverlayLuma(frame.nv21, frame.width, frame.height)
         val previous = lastScene
         overlay.observe(detected, now, screenTtl, previous != null && luminance.sceneChanged(previous)) { rect ->
@@ -183,7 +184,8 @@ internal class RemoteSubtitlePipeline(
     result.textBlocks.flatMapIndexed { group, block ->
       block.lines.mapNotNull { line ->
         val bounds = line.boundingBox ?: return@mapNotNull null
-        if (bounds.height() < 7 || (line.confidence > 0 && line.confidence < minConfidence)) return@mapNotNull null
+        val minimum = if (bounds.height() < height * .019) maxOf(.20f, minConfidence - .12f) else minConfidence
+        if (bounds.height() < 7 || (line.confidence > 0 && line.confidence < minimum)) return@mapNotNull null
         val x = bounds.left.coerceIn(0, width) / width.toDouble()
         val y = bounds.top.coerceIn(0, height) / height.toDouble()
         val w = bounds.right.coerceIn(0, width) / width.toDouble() - x

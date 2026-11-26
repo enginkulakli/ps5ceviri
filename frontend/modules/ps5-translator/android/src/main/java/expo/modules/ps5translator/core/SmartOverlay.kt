@@ -14,6 +14,8 @@ private val roman = Regex("[IVXLCDM]{2,5}")
 internal fun memoryText(value: String) = cleanOcr(value)
 
 internal object SmartOcr {
+  private data class Paragraph(val block: DetectedText, val last: OcrLine)
+
   fun group(lines: List<OcrLine>): List<DetectedText> {
     val normalized = lines.take(160).mapNotNull(::cleanLine).sortedBy { it.rect.y }
     val groupSizes = normalized.groupingBy { it.group }.eachCount()
@@ -23,27 +25,32 @@ internal object SmartOcr {
       if (duplicate < 0) distinct.add(line)
       else if (groupSizes.getValue(line.group) > groupSizes.getValue(distinct[duplicate].group)) distinct[duplicate] = line
     }
-    val paragraphs = mutableListOf<Pair<DetectedText, Int>>()
+    val paragraphs = mutableListOf<Paragraph>()
     for (line in distinct.sortedBy { it.rect.y }) {
       val best = paragraphs.indices.filter { i ->
-        val (previous, group) = paragraphs[i]
+        val (block, previous) = paragraphs[i]
         val gap = line.rect.y - previous.rect.bottom
-        val shared = (minOf(line.rect.right, previous.rect.right) - maxOf(line.rect.x, previous.rect.x)).coerceAtLeast(0.0)
-        val aligned = abs(previous.rect.x - line.rect.x) <= .018 &&
-          shared >= minOf(line.rect.w, previous.rect.w) * .70
-        val looksWrapped = previous.text.count { it == ' ' } >= 3 &&
-          previous.text.last() !in ".!?:…" && line.text.count { it == ' ' } >= 2
-        val related = (group == line.group && previous.text.count { it == ' ' } >= 2) || looksWrapped
-        related && aligned && gap in -.004..(line.rect.h * .42) &&
-          previous.text.length + line.text.length <= 420
-      }.minByOrNull { abs(paragraphs[it].first.rect.bottom - line.rect.y) }
-      if (best == null) paragraphs.add(DetectedText(line.text, line.rect) to line.group)
+        val lineHeight = maxOf(previous.rect.h, line.rect.h)
+        val shared = minOf(line.rect.right, previous.rect.right) - maxOf(line.rect.x, previous.rect.x)
+        val edgeDistance = minOf(abs(previous.rect.x - line.rect.x), abs(previous.rect.right - line.rect.right))
+        val aligned = edgeDistance <= minOf(.018, lineHeight * .75) &&
+          shared >= minOf(line.rect.w, previous.rect.w) * .70 &&
+          minOf(previous.rect.h, line.rect.h) >= lineHeight * .60
+        val sameBlock = previous.group == line.group &&
+          (previous.text.count { it == ' ' } >= 2 || line.text.first().isLowerCase())
+        val continuation = previous.text.count { it == ' ' } >= 2 &&
+          previous.text.last() !in ".!?:…" && (line.text.first().isLowerCase() || previous.text.endsWith('-'))
+        aligned && gap in -.004..(lineHeight * if (sameBlock) .52 else .32) &&
+          (sameBlock || continuation) && block.text.length + line.text.length <= 420
+      }.minByOrNull { abs(paragraphs[it].last.rect.bottom - line.rect.y) }
+      if (best == null) paragraphs.add(Paragraph(DetectedText(line.text, line.rect), line))
       else {
-        val previous = paragraphs[best].first
-        paragraphs[best] = DetectedText(cleanOcr(previous.text + "\n" + line.text), previous.rect.union(line.rect)) to line.group
+        val previous = paragraphs[best].block
+        val joined = cleanOcr(previous.text + "\n" + line.text)
+        paragraphs[best] = Paragraph(DetectedText(joined, previous.rect.union(line.rect)), line)
       }
     }
-    return paragraphs.map { it.first }.take(48)
+    return paragraphs.map { it.block }.take(48)
   }
 
   private fun cleanLine(line: OcrLine): OcrLine? {

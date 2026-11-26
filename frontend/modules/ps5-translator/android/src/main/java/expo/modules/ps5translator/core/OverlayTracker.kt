@@ -6,7 +6,7 @@ internal data class DetectedText(val text: String, val rect: FrameRect)
 
 internal class OverlayTracker {
   internal data class Item(val id: Long, val text: String, val rect: FrameRect, val seenAt: Long,
-                           val normalized: String, val missed: Int = 0)
+                           val normalized: String, val missed: Int = 0, val partial: Boolean = false)
   private data class Detection(val block: DetectedText, val key: String)
   private data class Match(val index: Int, val item: Item, val distance: Double)
 
@@ -27,12 +27,17 @@ internal class OverlayTracker {
     incoming.flatMapIndexed { i, detection ->
       remaining.mapNotNull { old ->
         val distance = old.rect.distance(detection.block.rect)
-        if (old.normalized == detection.key && distance < .14) Match(i, old, distance) else null
+        val rect = detection.block.rect
+        val movedWithinColumn = !sceneChanged && abs(old.rect.cx - rect.cx) < .035 && abs(old.rect.y - rect.y) < .24
+        if (old.normalized == detection.key && (distance < .14 || movedWithinColumn)) Match(i, old, distance) else null
       }
     }.sortedBy { it.distance }.forEach { match ->
       if (match.index !in matched && remaining.remove(match.item)) matched[match.index] = match.item
     }
 
+    val movingColumns = matched.mapNotNull { (index, old) ->
+      old.rect.takeIf { abs(it.y - incoming[index].block.rect.y) > .045 }
+    }
     val next = LinkedHashMap<Long, Item>()
     for ((index, detection) in incoming.withIndex()) {
       val (block, key) = detection
@@ -43,11 +48,16 @@ internal class OverlayTracker {
         ?.also(remaining::remove)
       val id = previous?.id ?: ++nextId
       val rect = if (previous?.normalized == key) previous.rect.follow(block.rect) else block.rect
-      next[id] = Item(id, block.text, rect, now, key)
+      next[id] = if (previous != null && !previous.partial && key.length >= 12 &&
+        previous.rect.overlap(block.rect) > .75 &&
+        (previous.normalized.startsWith("$key ") || previous.normalized.endsWith(" $key"))) {
+        previous.copy(rect = previous.rect.follow(block.rect), seenAt = now, missed = 0, partial = true)
+      } else Item(id, block.text, rect, now, key)
     }
     for (old in remaining) {
       if (next.size == 24) break
       if (!sceneChanged && old.missed == 0 && !changedAt(old.rect) &&
+        movingColumns.none { abs(it.cx - old.rect.cx) < .12 } &&
         incoming.none { it.block.rect.overlap(old.rect) > .46 }) {
         next[old.id] = old.copy(missed = 1)
       }

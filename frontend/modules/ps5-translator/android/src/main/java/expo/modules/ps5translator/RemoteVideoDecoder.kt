@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.os.SystemClock
 import java.nio.ByteBuffer
 import expo.modules.ps5translator.core.FrameRect
+import expo.modules.ps5translator.core.OcrFrame
 
 /** The transport thread feeds compressed samples. The service worker drains decoded frames. */
 internal class RemoteVideoDecoder {
@@ -127,5 +128,3 @@ internal data class SubtitleRegion(val x: Double, val y: Double, val width: Doub
     return OcrFrame(bytes, w, h)
   }
 }
-
-internal data class OcrFrame(val nv21: ByteArray, val width: Int, val height: Int)

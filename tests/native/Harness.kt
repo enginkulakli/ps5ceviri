@@ -23,6 +23,7 @@ fun main() {
   check(!tracker.observe("Follow the lanterh east.", 700))
   check(tracker.seenAt == 700L)
   checksV32Subtitles()
+  checksV32FullScreen()
   check(!tracker.observe("Follow the lantern  east.", 800) && tracker.seenAt == 800L)
   check(!tracker.observe("Wait here.", 900))
   check(tracker.observe("Wait here.", 1200))
