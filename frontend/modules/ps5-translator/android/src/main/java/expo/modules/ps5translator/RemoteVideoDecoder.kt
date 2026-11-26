@@ -11,6 +11,7 @@ import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.OcrFrame
 import expo.modules.ps5translator.core.PhoneSignature
 import expo.modules.ps5translator.core.pixelCrop
+import expo.modules.ps5translator.core.copyLuma
 
 /** The transport thread feeds compressed samples. The service worker drains decoded frames. */
 internal class RemoteVideoDecoder {
@@ -106,20 +107,8 @@ internal data class SubtitleRegion(val x: Double, val y: Double, val width: Doub
     val w = crop.width
     val h = crop.height
     val plane = image.planes[0]
-    val buffer = plane.buffer
-    val base = buffer.position()
     val bytes = ByteArray(w * h * 3 / 2)
-    val rowStride = plane.rowStride
-    val pixelStride = plane.pixelStride
-    for (row in 0 until h) {
-      val start = base + (top + row) * rowStride + left * pixelStride
-      if (pixelStride == 1) {
-        buffer.position(start)
-        buffer.get(bytes, row * w, w)
-      } else {
-        for (column in 0 until w) bytes[row * w + column] = buffer.get(start + column * pixelStride)
-      }
-    }
+    crop.copy(left = left, top = top).copyLuma(plane.buffer, plane.rowStride, plane.pixelStride, bytes)
     for (excluded in exclusions) {
       val fromX = (bounds.left + (excluded.x * bounds.width()).toInt() - left).coerceIn(0, w)
       val toX = (bounds.left + ((excluded.x + excluded.w) * bounds.width()).toInt() - left).coerceIn(0, w)

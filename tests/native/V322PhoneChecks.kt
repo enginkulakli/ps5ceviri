@@ -6,6 +6,9 @@ import expo.modules.ps5translator.core.PhoneSignature
 import expo.modules.ps5translator.core.TvOverlayLayout
 import expo.modules.ps5translator.core.memoryText
 import expo.modules.ps5translator.core.pixelCrop
+import expo.modules.ps5translator.core.PixelCrop
+import expo.modules.ps5translator.core.copyLuma
+import java.nio.ByteBuffer
 
 private fun picture(vararg rows: FrameRect, cursor: Boolean = false, variant: Int = 0, protectPhone: Boolean = false): PhoneSignature =
   PhoneSignature.sample(960, 540) { x, y ->
@@ -102,6 +105,17 @@ fun main() {
   val next = layout.arrange(phoneFixture.map { it.copy(ttlMs = 0) } + extra)
   check(next.filter { it.id != extra.id } == placed && next.size == placed.size + 1)
   println("Phone layout fixture · V3.2 and V3.2.2: ${placed.size}/${placed.size} equal wire rectangles; existing boxes stay pinned on insertion")
+
+  val plane = ByteBuffer.wrap(ByteArray(100) { it.toByte() }).apply { position(3) }
+  val a = ByteArray(6)
+  val b = ByteArray(6)
+  PixelCrop(2, 1, 3, 2).copyLuma(plane, 11, 1, a)
+  PixelCrop(0, 3, 3, 2).copyLuma(plane, 11, 1, b)
+  check(plane.position() == 3)
+  check(a.contentEquals(byteArrayOf(16, 17, 18, 27, 28, 29)))
+  check(b.contentEquals(byteArrayOf(36, 37, 38, 47, 48, 49)))
+  PixelCrop(1, 0, 3, 2).copyLuma(plane, 11, 2, b)
+  check(plane.position() == 3 && b.contentEquals(byteArrayOf(5, 7, 9, 16, 18, 20)))
 
   val pixels = FrameRect(.157, .723, .7, .215).pixelCrop(1280, 720)
   check(listOf(pixels.left, pixels.top, pixels.width, pixels.height) == listOf(200, 520, 896, 154))
