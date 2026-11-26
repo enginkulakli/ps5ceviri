@@ -15,6 +15,8 @@ import expo.modules.ps5translator.core.OverlayBox
 import expo.modules.ps5translator.core.OverlayMessage
 import expo.modules.ps5translator.core.OverlayLuma
 import expo.modules.ps5translator.core.OverlayTracker
+import expo.modules.ps5translator.core.PhoneScreen
+import expo.modules.ps5translator.core.pixelCrop
 import expo.modules.ps5translator.core.SendStatus
 import expo.modules.ps5translator.core.SubtitleTracker
 import expo.modules.ps5translator.core.SubtitleCaption
@@ -50,6 +52,8 @@ internal class RemoteSubtitlePipeline(
   private var glossary = GameGlossary(options.glossary)
   private var tracker = SubtitleTracker(options.intervalMs, options.confirmations)
   private val overlay = OverlayTracker()
+  private val phone = PhoneScreen()
+  private val phoneLayout = TvOverlayLayout.PhoneLayout()
   private val hud = HudFilter()
   private val cache = object : LinkedHashMap<String, String>(128, .75f, true) {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 180
@@ -66,7 +70,7 @@ internal class RemoteSubtitlePipeline(
   private var ocrBusy = false
   private var modelReady = false
   private var preparing = false
-  private var scanEpoch = 0L
+  @Volatile private var scanEpoch = 0L
   private var translationEpoch = 0L
   private var lastScanAt = 0L
   private var videoWidth = 1280
@@ -110,6 +114,12 @@ internal class RemoteSubtitlePipeline(
 
   fun configure(next: TranslationOptions, changedKey: Boolean = false) {
     if (next == options && !changedKey) return
+    // A subtitle-only edit cannot invalidate a running spatial mode.
+    if (!changedKey && options.mode != TranslationMode.SUBTITLE && next.mode == options.mode &&
+      next.copy(region = options.region, exclusions = options.exclusions) == options) {
+      options = next
+      return
+    }
     val engineChanged = changedKey || next.engine != options.engine || next.cloudLimits != options.cloudLimits
     if (engineChanged || next.glossary != options.glossary || next.archive != options.archive) {
       translationEpoch++
@@ -132,15 +142,21 @@ internal class RemoteSubtitlePipeline(
   }
 
   private val fullScreen get() = options.mode == TranslationMode.FULLSCREEN
+  private val phoneMode get() = options.mode == TranslationMode.PHONE
   private val scanInterval get() = if (fullScreen) maxOf(options.intervalMs, 500) else options.intervalMs
 
   fun needsFrame(now: Long): Boolean {
-    val interval = if (fullScreen) scanInterval else tracker.nextScanInterval(now)
+    val interval = when (options.mode) {
+      TranslationMode.PHONE -> PhoneScreen.PROBE_INTERVAL_MS
+      TranslationMode.FULLSCREEN -> scanInterval
+      TranslationMode.SUBTITLE -> tracker.nextScanInterval(now)
+    }
     return !closed && !ocrBusy && now - lastScanAt >= interval
   }
 
   fun process(image: Image) {
     val frameStarted = System.nanoTime()
+    if (phoneMode) { processPhone(image, frameStarted); return }
     val screen = fullScreen
     val frame = if (screen) SubtitleRegion(0.0, 0.0, 1.0, 1.0).crop(image)
       else options.region.crop(image, options.exclusions)
@@ -148,7 +164,10 @@ internal class RemoteSubtitlePipeline(
     ocrBusy = true
     val request = scanEpoch
     ocrWorker.execute {
-      if (closed) return@execute
+      if (closed || request != scanEpoch) {
+        handler.post { ocrBusy = false }
+        return@execute
+      }
       try {
         val recognition = if (screen) frame.enlargeForText() else frame
         val input = InputImage.fromByteArray(recognition.nv21, recognition.width, recognition.height, 0, InputImage.IMAGE_FORMAT_NV21)
@@ -173,6 +192,65 @@ internal class RemoteSubtitlePipeline(
         }
       }
     }
+  }
+
+  private fun processPhone(image: Image, frameStarted: Long) {
+    val now = SystemClock.elapsedRealtime()
+    lastScanAt = now
+    val signature = image.phoneSignature()
+    val scan = phone.inspect(signature, now)
+    TranslationMetrics.record("phoneProbe", frameStarted)
+    if (scan == null) return
+    val regions = if (scan.full) listOf(FrameRect(0.0, 0.0, 1.0, 1.0)) else scan.regions
+    val bounds = image.cropRect
+    val captures = regions.map { region ->
+      val crop = region.pixelCrop(bounds.width(), bounds.height())
+      val frame = SubtitleRegion(region.x, region.y, region.w, region.h).crop(image)
+      FrameRect(crop.left.toDouble() / bounds.width(), crop.top.toDouble() / bounds.height(),
+        frame.width.toDouble() / bounds.width(), frame.height.toDouble() / bounds.height()) to frame
+    }
+    val request = scanEpoch
+    val results = mutableListOf<DetectedText>()
+    ocrBusy = true
+    fun finish(success: Boolean) {
+      ocrBusy = false
+      if (closed || request != scanEpoch) return
+      if (!success) {
+        update { it.copy(ocr = "Telefon modu metni okuyamadı") }
+        return
+      }
+      videoWidth = signature.width
+      videoHeight = signature.height
+      phone.observe(scan, results, SystemClock.elapsedRealtime())
+      val ready = phone.visible()
+      rememberDetections(ready.map { it.source }, frameStarted)
+      update { it.copy(ocr = "Telefon modu · ${ready.size} blok", english = ready.joinToString(" · ") { msg -> msg.source }.take(420)) }
+      reconcile()
+    }
+    fun recognize(index: Int) {
+      if (index == captures.size) { finish(true); return }
+      val (region, frame) = captures[index]
+      ocrWorker.execute {
+        if (closed || request != scanEpoch) {
+          handler.post { finish(false) }
+          return@execute
+        }
+        val started = System.nanoTime()
+        try {
+          val input = frame.enlargeForText()
+          recognizer.process(InputImage.fromByteArray(input.nv21, input.width, input.height, 0, InputImage.IMAGE_FORMAT_NV21))
+            .addOnCompleteListener(callbackExecutor) { task ->
+              if (closed || request != scanEpoch || !task.isSuccessful) { finish(false); return@addOnCompleteListener }
+              TranslationMetrics.record(if (scan.full) "phoneFullOcr" else "phoneRegionOcr", started)
+              results += screenText(task.result, input.width, input.height, null, region)
+              recognize(index + 1)
+            }
+        } catch (_: Exception) {
+          handler.post { finish(false) }
+        }
+      }
+    }
+    recognize(0)
   }
 
   private fun onRecognition(result: Text, frame: OcrFrame, recognition: OcrFrame, frameStarted: Long) {
@@ -221,7 +299,8 @@ internal class RemoteSubtitlePipeline(
   private val minConfidence get() = (0.68 - 0.46 * options.sensitivity).toFloat()
   private val screenTtl get() = maxOf(options.ttlMs, scanInterval * 2 + 150)
 
-  private fun screenText(result: Text, width: Int, height: Int, diagnostic: JSONObject?): List<DetectedText> {
+  private fun screenText(result: Text, width: Int, height: Int, diagnostic: JSONObject?,
+                         region: FrameRect? = null): List<DetectedText> {
     val raw = if (diagnostic != null) JSONArray() else null
     val rejected = if (diagnostic != null) JSONArray() else null
     fun normalized(bounds: android.graphics.Rect?): FrameRect? {
@@ -230,7 +309,9 @@ internal class RemoteSubtitlePipeline(
       val y = bounds.top.coerceIn(0, height) / height.toDouble()
       val w = bounds.right.coerceIn(0, width) / width.toDouble() - x
       val h = bounds.bottom.coerceIn(0, height) / height.toDouble() - y
-      return if (w > 0 && h > 0) FrameRect(x, y, w, h) else null
+      if (w <= 0 || h <= 0) return null
+      return if (region == null) FrameRect(x, y, w, h)
+      else FrameRect(region.x + x * region.w, region.y + y * region.h, w * region.w, h * region.h)
     }
     val candidates = result.textBlocks.flatMapIndexed { group, block ->
       val lines = if (diagnostic != null) JSONArray() else null
@@ -302,10 +383,12 @@ internal class RemoteSubtitlePipeline(
       archiveRevision = revision
       translationEpoch++
       cache.clear()
+      if (phoneMode) phone.clearTranslations()
       failed.clear()
       inFlight.clear()
     }
     val now = SystemClock.elapsedRealtime()
+    if (phoneMode) { reconcilePhone(now); return }
     if (fullScreen) {
       val active = overlay.alive(now, screenTtl)
       requestTranslations(active.filter(overlay::seenInLatestFrame).map { it.text to it.normalized }, now)
@@ -359,6 +442,33 @@ internal class RemoteSubtitlePipeline(
       .minOrNull()?.let { scheduleAt(it, now) }
   }
 
+  private fun reconcilePhone(now: Long) {
+    phone.applyTranslations(cache::get)
+    val visible = phone.visible()
+    requestTranslations(visible.filter { it.translated == null }.map { it.source to it.key }, now)
+    val inputs = visible.mapNotNull { item -> item.translated?.let { OverlayBox(item.id, it, item.rect, 0) } }
+    val changed = inputs != lastLayoutInputs
+    if (changed) {
+      lastLayoutInputs = inputs
+      lastLayout = phoneLayout.arrange(inputs)
+    }
+    if (changed || (lastLayout.isNotEmpty() && now >= tvOverlayExpires)) {
+      val started = System.nanoTime()
+      val boxes = lastLayout.map { it.copy(ttlMs = PhoneScreen.LEASE_MS) }
+      val clients = ServerController.core.sendOverlay(OverlayMessage(videoWidth, videoHeight, boxes))
+      TranslationMetrics.record("websocket", started)
+      if (changed) {
+        if (clients > 0) visible.filter { item ->
+          item.translated != null && previousOverlay.none { it.id == item.id && it.text == item.translated }
+        }.forEach { item -> detectedAt[item.key]?.let { TranslationMetrics.record("phoneToWebSocket", it) } }
+        update { state -> state.copy(turkish = boxes.joinToString(" · ") { it.text }.take(420)) }
+        previousOverlay = boxes
+      }
+      tvOverlayExpires = now + PhoneScreen.RENEW_AFTER_MS
+    }
+    if (lastLayout.isNotEmpty()) scheduleAt(tvOverlayExpires, now)
+  }
+
   private fun publishCaption(shown: SubtitleCaption, now: Long) {
     val server = ServerController.core
     val remaining = (shown.until - now).coerceAtLeast(1)
@@ -403,9 +513,12 @@ internal class RemoteSubtitlePipeline(
           reconcile()
           return
         }
-        val stillVisible = if (fullScreen) overlay.alive(SystemClock.elapsedRealtime(), screenTtl)
-          .any { overlay.seenInLatestFrame(it) && it.normalized == normalized }
-          else tracker.translationSource(SystemClock.elapsedRealtime(), options.ttlMs) == normalized
+        val stillVisible = when (options.mode) {
+          TranslationMode.PHONE -> phone.visible().any { it.key == normalized && it.translated == null }
+          TranslationMode.FULLSCREEN -> overlay.alive(SystemClock.elapsedRealtime(), screenTtl)
+            .any { overlay.seenInLatestFrame(it) && it.normalized == normalized }
+          TranslationMode.SUBTITLE -> tracker.translationSource(SystemClock.elapsedRealtime(), options.ttlMs) == normalized
+        }
         if (!modelReady || !stillVisible) {
           inFlight.finish(normalized, attempt)
           if (!modelReady) failed[normalized] = SystemClock.elapsedRealtime() + 1000
@@ -468,6 +581,8 @@ internal class RemoteSubtitlePipeline(
     inFlight.clear()
     tracker = SubtitleTracker(options.intervalMs, options.confirmations)
     overlay.clear()
+    phone.clear()
+    phoneLayout.clear()
     hud.clear()
     caption?.let { ServerController.core.clearIfCurrent(it.text) }
     caption = null

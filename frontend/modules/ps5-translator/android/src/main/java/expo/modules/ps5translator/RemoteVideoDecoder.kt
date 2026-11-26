@@ -9,6 +9,8 @@ import android.os.SystemClock
 import java.nio.ByteBuffer
 import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.OcrFrame
+import expo.modules.ps5translator.core.PhoneSignature
+import expo.modules.ps5translator.core.pixelCrop
 
 /** The transport thread feeds compressed samples. The service worker drains decoded frames. */
 internal class RemoteVideoDecoder {
@@ -98,10 +100,11 @@ internal data class SubtitleRegion(val x: Double, val y: Double, val width: Doub
   fun crop(image: Image, exclusions: List<FrameRect> = emptyList()): OcrFrame {
     check(image.format == ImageFormat.YUV_420_888) { "Video decoder did not return YUV_420_888" }
     val bounds = image.cropRect
-    val left = ((bounds.width() * x).toInt() + bounds.left).coerceIn(bounds.left, bounds.right - 2)
-    val top = ((bounds.height() * y).toInt() + bounds.top).coerceIn(bounds.top, bounds.bottom - 2)
-    val w = minOf((bounds.width() * width).toInt().coerceAtLeast(2), bounds.right - left) and -2
-    val h = minOf((bounds.height() * height).toInt().coerceAtLeast(2), bounds.bottom - top) and -2
+    val crop = FrameRect(x, y, width, height).pixelCrop(bounds.width(), bounds.height())
+    val left = bounds.left + crop.left
+    val top = bounds.top + crop.top
+    val w = crop.width
+    val h = crop.height
     val plane = image.planes[0]
     val buffer = plane.buffer
     val base = buffer.position()
@@ -126,5 +129,15 @@ internal data class SubtitleRegion(val x: Double, val y: Double, val width: Doub
     }
     bytes.fill(128.toByte(), w * h)
     return OcrFrame(bytes, w, h)
+  }
+}
+
+internal fun Image.phoneSignature(): PhoneSignature {
+  val bounds = cropRect
+  val plane = planes[0]
+  val bytes = plane.buffer
+  val origin = bytes.position() + bounds.top * plane.rowStride + bounds.left * plane.pixelStride
+  return PhoneSignature.sample(bounds.width(), bounds.height()) { x, y ->
+    bytes.get(origin + y * plane.rowStride + x * plane.pixelStride).toInt() and 255
   }
 }

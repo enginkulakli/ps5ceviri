@@ -4,7 +4,7 @@ import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.GlossaryEntry
 import org.json.JSONObject
 
-internal enum class TranslationMode { SUBTITLE, FULLSCREEN }
+internal enum class TranslationMode { SUBTITLE, FULLSCREEN, PHONE }
 
 internal data class TranslationOptions(
   val mode: TranslationMode,
@@ -28,7 +28,11 @@ internal data class TranslationOptions(
       val exclusions = doc.optJSONArray("exclusions")
       val glossary = doc.optJSONArray("glossary")
       return TranslationOptions(
-        if (doc.optString("mode") == "fullscreen") TranslationMode.FULLSCREEN else TranslationMode.SUBTITLE,
+        when (doc.optString("mode")) {
+          "phone" -> TranslationMode.PHONE
+          "fullscreen" -> TranslationMode.FULLSCREEN
+          else -> TranslationMode.SUBTITLE
+        },
         EngineId.entries.find { it.key == doc.optString("engine") } ?: EngineId.OFFLINE,
         SubtitleRegion(area.x, area.y, area.w, area.h),
         (0 until minOf(exclusions?.length() ?: 0, 8)).mapNotNull { exclusions?.optJSONObject(it)?.rect() },

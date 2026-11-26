@@ -113,6 +113,32 @@ internal object TvOverlayLayout {
     return (placed.map { it.box } + fallback).sortedBy { it.id }
   }
 
+  /** Preserve V3.2's source-centred reservations, and lock already placed messages. */
+  class PhoneLayout {
+    private data class Entry(val input: OverlayBox, val placement: Placement?)
+    private val pinned = mutableMapOf<Long, Entry>()
+
+    fun arrange(boxes: List<OverlayBox>): List<OverlayBox> {
+      val inputs = boxes.associateBy { it.id }
+      pinned.entries.removeAll { (id, entry) -> inputs[id] != entry.input }
+      val placed = pinned.values.mapNotNull { it.placement }.toMutableList()
+      val fresh = boxes.filter { it.id !in pinned }
+        .sortedWith(compareByDescending<OverlayBox> { it.text.length > 60 }.thenBy { it.rect.y }.thenBy { it.rect.x }.thenBy { it.id })
+      for (box in fresh) {
+        val placement = place(box, placed)
+        if (placement != null) placed.add(placement)
+        pinned[box.id] = Entry(box, placement)
+      }
+      return boxes.map { box ->
+        // Forward the original anchor when there is no V3.2 slot. The installed
+        // TV renderer can wrap or compact without controlling phone identity.
+        pinned.getValue(box.id).placement?.box ?: anchor(box)
+      }.sortedBy { it.id }
+    }
+
+    fun clear() = pinned.clear()
+  }
+
   private fun anchor(box: OverlayBox): OverlayBox {
     val w = box.rect.w.coerceIn(.025, MAX_WIRE_WIDTH)
     val h = box.rect.h.coerceIn(.01, .32)
