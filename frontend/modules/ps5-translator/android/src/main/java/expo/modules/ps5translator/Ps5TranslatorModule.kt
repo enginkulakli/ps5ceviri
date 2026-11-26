@@ -62,6 +62,20 @@ class Ps5TranslatorModule : Module() {
       toBundle(ServerController.core.snapshot())
     }
 
+    AsyncFunction("getTvDiscovery") {
+      ServerController.discovery?.snapshot() ?: Bundle().apply {
+        putBoolean("available", false)
+        putString("error", ServerController.discoveryError)
+        putParcelableArrayList("waiting", arrayListOf<Bundle>())
+        putParcelableArrayList("paired", arrayListOf<Bundle>())
+      }
+    }
+
+    AsyncFunction("approveDiscoveredTv") { id: String, code: String ->
+      val discovery = ServerController.discovery ?: throw IllegalStateException("Önce TV sunucusunu başlatın.")
+      discovery.approve(id, code)
+    }
+
     AsyncFunction("hasOverlayPermission") {
       Settings.canDrawOverlays(context)
     }

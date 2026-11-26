@@ -68,6 +68,7 @@ class SubtitleServerService : Service() {
       ACTION_STOP -> {
         prefs.shouldRun = false
         handler.post {
+          ServerController.stopDiscovery()
           ServerController.core.stop()
           stopSelfSafely()
         }
@@ -86,7 +87,11 @@ class SubtitleServerService : Service() {
           ServerController.wifiConnected = NetworkUtils.isOnWifi(this)
           if (!ServerController.wifiConnected) ServerController.core.recordError("Wi-Fi bağlı değil. TV aynı Wi-Fi ağında olmalı.")
           val err = ServerController.core.start(prefs.port, prefs.allowedIp)
-          if (err != null) prefs.shouldRun = false
+          if (err == null) ServerController.startDiscovery(this, prefs.port)
+          else {
+            prefs.shouldRun = false
+            ServerController.stopDiscovery()
+          }
           ServerController.notifyChanged()
         }
       }
@@ -103,6 +108,7 @@ class SubtitleServerService : Service() {
 
   override fun onDestroy() {
     ServerController.removeListener(snapshotListener)
+    ServerController.stopDiscovery()
     ServerController.core.stop()
     releaseLocks()
     unregisterNetworkCallback()
@@ -160,7 +166,7 @@ class SubtitleServerService : Service() {
       ServerController.wifiConnected = NetworkUtils.isOnWifi(this)
       if (lostMessage != null && !ServerController.wifiConnected) ServerController.core.recordError(lostMessage)
       else if (oldIp != null && ServerController.localIp != null && oldIp != ServerController.localIp)
-        ServerController.core.recordError("Tablet IP adresi değişti: $oldIp → ${ServerController.localIp}. TV uygulamasında yeni adresi kullanın.")
+        ServerController.core.recordError("Tablet IP adresi değişti: $oldIp → ${ServerController.localIp}. Eşleştirilmiş TV adresi yeniden bulur. Manuel bağlantıda TV’de yeni adresi kullanın.")
       ServerController.notifyChanged()
     }, 300)
   }

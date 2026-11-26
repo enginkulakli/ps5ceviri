@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Linking, Text, View } from "react-native";
 
 import { Button, Card, Field, Notice, StatusBadge } from "@/src/components/ui";
 import { fonts, radius, space } from "@/src/fonts";
-import { NATIVE_REQUIRED_MESSAGE } from "@/src/native/bridge";
+import { hasNative, nativeModule, NATIVE_REQUIRED_MESSAGE, type TvDiscoveryState } from "@/src/native/bridge";
 import { makeStyles } from "@/src/theme";
 import { useTvServer } from "@/src/tv/TvServerProvider";
 
@@ -15,6 +15,40 @@ export function TvServerPanel({ idPrefix, showManual = true }: { idPrefix: strin
   const s = tv.state;
   const [manual, setManual] = useState("");
   const [explain, setExplain] = useState(false);
+  const [discovery, setDiscovery] = useState<TvDiscoveryState | null>(null);
+  const [pairingId, setPairingId] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState("");
+  const [pairingStatus, setPairingStatus] = useState<{ id: string; error?: string } | null>(null);
+  const [pairingBusy, setPairingBusy] = useState(false);
+  useEffect(() => {
+    if (!s?.running || !hasNative("getTvDiscovery")) { setDiscovery(null); return; }
+    let active = true;
+    let pending = false;
+    const refresh = async () => {
+      if (!active || pending) return;
+      pending = true;
+      try {
+        const found = await nativeModule!.getTvDiscovery();
+        if (active) setDiscovery(found);
+      } catch {
+        // A foreground-service restart can interrupt a poll.
+      } finally { pending = false; }
+    };
+    void refresh();
+    const timer = setInterval(refresh, 1200);
+    return () => { active = false; clearInterval(timer); };
+  }, [s?.running]);
+
+  const pair = async (tvId: string) => {
+    setPairingBusy(true);
+    try {
+      await nativeModule!.approveDiscoveredTv(tvId, pairingCode);
+      setPairingStatus({ id: tvId });
+      setPairingCode("");
+    } catch (cause) {
+      setPairingStatus({ id: tvId, error: cause instanceof Error ? cause.message : "Eşleştirme başlatılamadı." });
+    } finally { setPairingBusy(false); }
+  };
   const id = (x: string) => `${idPrefix}-${x}`;
 
   const onStart = () => {
@@ -101,6 +135,32 @@ export function TvServerPanel({ idPrefix, showManual = true }: { idPrefix: strin
         )}
         <Button testID={id("test-tv")} label="TV bağlantısını test et" icon="pulse-outline" variant="secondary" style={{ flex: 1 }} loading={tv.busy === "test"} onPress={tv.test} disabled={!tv.available} />
       </View>
+
+      {discovery?.error ? <Notice kind="warning" text={discovery.error} /> : null}
+      {discovery?.available ? (
+        <View style={styles.block}>
+          <Text style={styles.label}>Otomatik TV bağlantısı</Text>
+          <Text style={styles.meta}>İlk bağlantıda TV’de “Ağda Cihaz Bul” seçeneğini açın.</Text>
+          {discovery.paired.map(tv => (
+            <Text key={tv.id} style={styles.meta}>TV {tv.id.slice(0, 6).toUpperCase()} · Eşleştirildi{tv.ip ? ` · ${tv.ip}` : ""}</Text>
+          ))}
+          {discovery.waiting.map(tv => (
+            <View key={tv.id} style={styles.block}>
+              <Button label={`TV ${tv.id.slice(0, 6).toUpperCase()} · ${tv.ip}`} variant="secondary"
+                onPress={() => { setPairingId(tv.id); setPairingCode(""); setPairingStatus(null); }} />
+              {pairingId === tv.id ? (
+                <>
+                  <Field label="TV’deki eşleştirme kodu" value={pairingCode} onChangeText={setPairingCode}
+                    autoCapitalize="none" autoCorrect={false} secureTextEntry />
+                  <Button label="TV’yi eşleştir" loading={pairingBusy} disabled={pairingBusy || !pairingCode}
+                    onPress={() => void pair(tv.id)} />
+                </>
+              ) : null}
+            </View>
+          ))}
+          {pairingStatus?.error ? <Notice kind="error" text={pairingStatus.error} /> : null}
+        </View>
+      ) : null}
 
       {showManual ? (
         <View style={{ gap: space.sm }}>

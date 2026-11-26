@@ -45,6 +45,7 @@ data class SendResult(val status: SendStatus, val clients: Int)
 class SubtitleServerCore(
   private val onChange: (ServerSnapshot) -> Unit,
   private val clock: () -> Long = { System.currentTimeMillis() },
+  private val authenticatedPeer: (String) -> Boolean = { false },
 ) {
   private val lock = Any()
   private var server: Inner? = null
@@ -263,7 +264,7 @@ class SubtitleServerCore(
     override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
       val ip = addr(conn)
       val allow = allowedIp
-      if (allow != null && ip != allow) {
+      if (allow != null && ip != allow && !authenticatedPeer(ip)) {
         synchronized(lock) { rejectedCount++ }
         recordError("İzin verilmeyen cihaz reddedildi: $ip")
         conn.close(1008, "not allowed")

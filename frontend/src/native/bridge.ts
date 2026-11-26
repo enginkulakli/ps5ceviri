@@ -38,10 +38,19 @@ export type TvServerState = {
   startedAtMs: number;
 };
 
+export type TvDiscoveryState = {
+  available: boolean;
+  error: string | null;
+  waiting: Array<{ id: string; ip: string }>;
+  paired: Array<{ id: string; ip: string | null }>;
+};
+
 export type SendStatus = "sent" | "duplicate" | "no_clients" | "not_running";
 export type SendResult = { status: SendStatus; clients: number };
 
 export interface Ps5TranslatorNativeModule {
+  getTvDiscovery(): Promise<TvDiscoveryState>;
+  approveDiscoveredTv(id: string, code: string): Promise<void>;
   getServerState(): Promise<TvServerState>;
   getLocalIpAddress(): Promise<string | null>;
   startTvServer(port: number, allowedTvIp: string | null): Promise<TvServerState>;
