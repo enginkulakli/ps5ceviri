@@ -13,6 +13,7 @@ on:
       - fix/v3-translation-stability
       - fix/v3-console-management
       - feature/v3.2-stability
+      - fix/v3.2.1-performance
     paths:
       - 'frontend/**'
       - 'tests/native/**'
