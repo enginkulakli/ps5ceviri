@@ -26,7 +26,7 @@ const round = (v: number) => Math.round(v * 100) / 100;
 export default function OcrRegionScreen() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
-  const { settings, update } = useSettings();
+  const { settings, ready, update } = useSettings();
   const r = settings.ocrRegion;
   const { edit } = useLocalSearchParams<{ edit?: string }>();
   const [editing, setEditing] = useState(edit === "1");
@@ -60,7 +60,7 @@ export default function OcrRegionScreen() {
         <View style={{ marginTop: space.lg }}>
           <RegionPreview region={r} exclusions={areas} testID="ocr-region-editor-preview" />
           <View style={{ marginTop: space.md }}>
-            <Button testID="edit-remote-region" label="Alanı Düzenle" onPress={() => setEditing(true)} />
+            <Button testID="edit-remote-region" label="Alanı Düzenle" disabled={!ready} onPress={() => setEditing(true)} />
           </View>
         </View>
         <SectionTitle title="Hazır alanlar" />
@@ -94,7 +94,7 @@ export default function OcrRegionScreen() {
           </> : null}
         </Card>
       </ScrollView>
-      {editing ? <RemoteRegionEditor initial={r} exclusions={areas} onCancel={() => setEditing(false)}
+      {ready && editing ? <RemoteRegionEditor initial={r} exclusions={areas} onCancel={() => setEditing(false)}
         onSave={next => { update({ ocrRegion: next }); setEditing(false); }} /> : null}
     </View>
   );
