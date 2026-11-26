@@ -33,8 +33,8 @@ export function RemotePlayProvider({ children }: { children: ReactNode }) {
   const active = status?.active;
 
   useEffect(() => {
-    if (active && hasNative("updateTranslation")) void nativeModule!.updateTranslation(settingsJson).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-  }, [active, settingsJson]);
+    if (ready && active && hasNative("updateTranslation")) void nativeModule!.updateTranslation(settingsJson).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+  }, [ready, active, settingsJson]);
 
   useEffect(() => {
     const bridge = nativeModule;
