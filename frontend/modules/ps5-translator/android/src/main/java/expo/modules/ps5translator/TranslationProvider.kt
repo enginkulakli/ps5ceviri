@@ -11,6 +11,7 @@ import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import expo.modules.ps5translator.core.GameGlossary
 import expo.modules.ps5translator.core.TranslationAttempt
+import java.util.concurrent.Executor
 
 internal const val API_NOT_CONFIGURED = "API yapılandırılmadı"
 
@@ -55,6 +56,7 @@ private object AiProvider : UnconfiguredProvider()
 
 private class MlKitProvider : TranslationProvider {
   override val available = true
+  private val finishParts = Executor { it.run() }
   private val client = Translation.getClient(TranslatorOptions.Builder()
     .setSourceLanguage(TranslateLanguage.ENGLISH)
     .setTargetLanguage(TranslateLanguage.TURKISH)
@@ -67,12 +69,12 @@ private class MlKitProvider : TranslationProvider {
     if (parts.size == 1 && !parts[0].protected) return client.translate(request.text)
     val tasks = parts.map { part ->
       if (part.protected || part.text.none(Char::isLetter)) Tasks.forResult(part.text)
-      else client.translate(part.text.trim()).continueWith { result ->
+      else client.translate(part.text.trim()).continueWith(finishParts) { result ->
         part.text.takeWhile(Char::isWhitespace) + result.result.trim() +
           part.text.takeLastWhile(Char::isWhitespace)
       }
     }
-    return Tasks.whenAllSuccess<String>(tasks).continueWith { result -> result.result.joinToString("") }
+    return Tasks.whenAllSuccess<String>(finishParts, tasks).continueWith(finishParts) { result -> result.result.joinToString("") }
   }
 
   override fun close() = client.close()

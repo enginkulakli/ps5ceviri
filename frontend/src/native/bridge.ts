@@ -86,6 +86,8 @@ export interface Ps5TranslatorNativeModule {
   deleteCloudKey(): Promise<void>;
   testCloudConnection(daily: number, monthly: number): Promise<string>;
   getTranslationMetrics(): Promise<string>;
+  setScreenOcrDiagnostics(enabled: boolean): Promise<void>;
+  getScreenOcrDiagnostics(): Promise<string>;
   getArchiveOverview(): Promise<string>;
   createArchiveGame(name: string): Promise<string>;
   getArchivePage(game: string, search: string, before: number): Promise<string>;

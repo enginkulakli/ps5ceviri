@@ -303,6 +303,10 @@ class SubtitleServerCore(
     }
 
     override fun onMessage(conn: WebSocket, message: String) {
+      if (message == "{\"type\":\"ping\"}") {
+        if (synchronized(lock) { conn in clients }) runCatching { conn.send("{\"type\":\"pong\"}") }
+        return
+      }
       if (message != "{\"type\":\"hello\",\"subtitleVersion\":2}" &&
         message != "{\"type\":\"hello\",\"subtitleVersion\":3}") return
       synchronized(lock) {

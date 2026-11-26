@@ -26,6 +26,11 @@ import expo.modules.ps5translator.core.OcrLine
 import expo.modules.ps5translator.core.SmartOcr
 import expo.modules.ps5translator.core.TvOverlayLayout
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import org.json.JSONArray
+import org.json.JSONObject
+import expo.modules.ps5translator.core.OcrFrame
 
 internal data class RemotePlayOptions(val host: String, val keepWifiAwake: Boolean, val translation: TranslationOptions)
 
@@ -37,6 +42,7 @@ internal class RemoteSubtitlePipeline(
   private val update: ((RemotePlayStatus) -> RemotePlayStatus) -> Unit,
 ) {
   private val callbackExecutor = Executor { handler.post(it) }
+  private val ocrWorker = Executors.newSingleThreadExecutor { work -> Thread(work, "remote-play-ocr") }
   private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
   private val archive = TranslationArchive.get(context)
   private var archiveRevision = archive.revision.get()
@@ -56,7 +62,7 @@ internal class RemoteSubtitlePipeline(
   private var lastLayoutInputs = emptyList<OverlayBox>()
   private var lastLayout = emptyList<OverlayBox>()
   private var tvOverlayExpires = 0L
-  private var closed = false
+  @Volatile private var closed = false
   private var ocrBusy = false
   private var modelReady = false
   private var preparing = false
@@ -129,71 +135,131 @@ internal class RemoteSubtitlePipeline(
   private val scanInterval get() = if (fullScreen) maxOf(options.intervalMs, 500) else options.intervalMs
 
   fun needsFrame(now: Long): Boolean {
-    val interval = if (!fullScreen && scanInterval <= 300 && tracker.recentlyRead(now)) minOf(180, scanInterval)
-      else scanInterval
+    val interval = if (fullScreen) scanInterval else tracker.nextScanInterval(now)
     return !closed && !ocrBusy && now - lastScanAt >= interval
   }
 
   fun process(image: Image) {
-    val frame = if (fullScreen) SubtitleRegion(0.0, 0.0, 1.0, 1.0).crop(image)
+    val frameStarted = System.nanoTime()
+    val screen = fullScreen
+    val frame = if (screen) SubtitleRegion(0.0, 0.0, 1.0, 1.0).crop(image)
       else options.region.crop(image, options.exclusions)
     lastScanAt = SystemClock.elapsedRealtime()
     ocrBusy = true
     val request = scanEpoch
-    val ocrStarted = System.nanoTime()
-    val recognition = if (fullScreen) frame.enlargeForText() else frame
-    val input = InputImage.fromByteArray(recognition.nv21, recognition.width, recognition.height, 0, InputImage.IMAGE_FORMAT_NV21)
-    recognizer.process(input).addOnCompleteListener(callbackExecutor) { task ->
-      ocrBusy = false
-      if (closed || request != scanEpoch) return@addOnCompleteListener
-      if (!task.isSuccessful) {
-        update { it.copy(ocr = "OCR kareyi okuyamadı") }
-        return@addOnCompleteListener
-      }
-      TranslationMetrics.record("ocr", ocrStarted)
-      val comparison = System.nanoTime()
-      val now = SystemClock.elapsedRealtime()
-      if (fullScreen) {
-        videoWidth = frame.width
-        videoHeight = frame.height
-        val detected = screenText(task.result, recognition.width, recognition.height)
-        val luminance = OverlayLuma(frame.nv21, frame.width, frame.height)
-        val previous = lastScene
-        overlay.observe(detected, now, screenTtl, previous != null && luminance.sceneChanged(previous)) { rect ->
-          previous != null && luminance.changedAt(previous, rect)
+    ocrWorker.execute {
+      if (closed) return@execute
+      try {
+        val recognition = if (screen) frame.enlargeForText() else frame
+        val input = InputImage.fromByteArray(recognition.nv21, recognition.width, recognition.height, 0, InputImage.IMAGE_FORMAT_NV21)
+        val ocrStarted = System.nanoTime()
+        TranslationMetrics.record("framePreparation", frameStarted)
+        recognizer.process(input).addOnCompleteListener({ work -> work.run() }) { task ->
+          val completedAt = System.nanoTime()
+          handler.post {
+            ocrBusy = false
+            if (closed || request != scanEpoch) return@post
+            if (task.isSuccessful) {
+              TranslationMetrics.recordDuration("ocr", completedAt - ocrStarted)
+              TranslationMetrics.record("ocrDelivery", completedAt)
+              onRecognition(task.result, frame, recognition, frameStarted)
+            } else update { it.copy(ocr = "OCR kareyi okuyamadı") }
+          }
         }
-        lastScene = luminance
-        rememberDetections(detected.map { it.text }, comparison)
-        update { it.copy(ocr = "Tam ekran · ${detected.size} blok", english = detected.joinToString(" · ") { block -> block.text }.take(420)) }
-      } else {
-        val reading = subtitleText(task.result, frame.width, frame.height, now)
-        val changed = tracker.observe(reading?.text.orEmpty(), now, reliable = reading?.reliable == true)
-        rememberDetections(listOf(tracker.text, tracker.translationSource(now, options.ttlMs)).filter(String::isNotEmpty), comparison)
-        update { it.copy(ocr = if (reading == null) "Altyazı aranıyor" else "Altyazı okunuyor",
-          english = if (changed) tracker.text else it.english) }
+      } catch (_: Exception) {
+        handler.post {
+          ocrBusy = false
+          if (!closed && request == scanEpoch) update { it.copy(ocr = "OCR kareyi işleyemedi") }
+        }
       }
-      TranslationMetrics.record("comparison", comparison)
-      reconcile()
     }
+  }
+
+  private fun onRecognition(result: Text, frame: OcrFrame, recognition: OcrFrame, frameStarted: Long) {
+    val comparison = System.nanoTime()
+    val now = SystemClock.elapsedRealtime()
+    if (fullScreen) {
+      videoWidth = frame.width
+      videoHeight = frame.height
+      val diagnostic = ScreenOcrDiagnostics.begin(frame.width, frame.height, recognition.width, recognition.height)
+      val detected = screenText(result, recognition.width, recognition.height, diagnostic)
+      val luminance = OverlayLuma(frame.nv21, frame.width, frame.height)
+      val previous = lastScene
+      overlay.observe(detected, now, screenTtl, previous != null && luminance.sceneChanged(previous)) { rect ->
+        previous != null && luminance.changedAt(previous, rect)
+      }
+      lastScene = luminance
+      diagnostic?.let {
+        val grouped = JSONArray()
+        for ((index, block) in detected.withIndex()) {
+          grouped.put(ScreenOcrDiagnostics.text(block.text, block.rect)
+            .put("state", if (index >= 24) "track_limit" else "candidate"))
+        }
+        val tracked = JSONArray()
+        overlay.alive(now, screenTtl).forEach { item ->
+          tracked.put(ScreenOcrDiagnostics.text(item.text, item.rect).put("id", item.id)
+            .put("seenInLatestFrame", overlay.seenInLatestFrame(item))
+            .put("translationReady", item.normalized in cache).put("translationPending", item.normalized in inFlight))
+        }
+        it.put("grouped", grouped).put("tracked", tracked)
+        ScreenOcrDiagnostics.record(it)
+      }
+      rememberDetections(detected.map { it.text }, frameStarted)
+      update { it.copy(ocr = "Tam ekran · ${detected.size} blok", english = detected.joinToString(" · ") { block -> block.text }.take(420)) }
+    } else {
+      val reading = subtitleText(result, frame.width, frame.height, now)
+      val changed = tracker.observe(reading?.text.orEmpty(), now, reliable = reading?.reliable == true)
+      if (changed) TranslationMetrics.recordDuration("stability", TimeUnit.MILLISECONDS.toNanos(tracker.confirmationMs))
+      rememberDetections(listOf(tracker.text, tracker.translationSource(now, options.ttlMs)).filter(String::isNotEmpty), frameStarted)
+      update { it.copy(ocr = if (reading == null) "Altyazı aranıyor" else "Altyazı okunuyor",
+        english = if (changed) tracker.text else it.english) }
+    }
+    TranslationMetrics.record("comparison", comparison)
+    reconcile()
   }
 
   private val minConfidence get() = (0.68 - 0.46 * options.sensitivity).toFloat()
   private val screenTtl get() = maxOf(options.ttlMs, scanInterval * 2 + 150)
 
-  private fun screenText(result: Text, width: Int, height: Int): List<DetectedText> = SmartOcr.group(
-    result.textBlocks.flatMapIndexed { group, block ->
+  private fun screenText(result: Text, width: Int, height: Int, diagnostic: JSONObject?): List<DetectedText> {
+    val raw = if (diagnostic != null) JSONArray() else null
+    val rejected = if (diagnostic != null) JSONArray() else null
+    fun normalized(bounds: android.graphics.Rect?): FrameRect? {
+      if (bounds == null) return null
+      val x = bounds.left.coerceIn(0, width) / width.toDouble()
+      val y = bounds.top.coerceIn(0, height) / height.toDouble()
+      val w = bounds.right.coerceIn(0, width) / width.toDouble() - x
+      val h = bounds.bottom.coerceIn(0, height) / height.toDouble() - y
+      return if (w > 0 && h > 0) FrameRect(x, y, w, h) else null
+    }
+    val candidates = result.textBlocks.flatMapIndexed { group, block ->
+      val lines = if (diagnostic != null) JSONArray() else null
+      raw?.put(ScreenOcrDiagnostics.text(block.text, normalized(block.boundingBox)).put("lines", lines))
       block.lines.mapNotNull { line ->
-        val bounds = line.boundingBox ?: return@mapNotNull null
-        val minimum = if (bounds.height() < height * .019) maxOf(.20f, minConfidence - .12f) else minConfidence
-        if (bounds.height() < 7 || (line.confidence > 0 && line.confidence < minimum)) return@mapNotNull null
-        val x = bounds.left.coerceIn(0, width) / width.toDouble()
-        val y = bounds.top.coerceIn(0, height) / height.toDouble()
-        val w = bounds.right.coerceIn(0, width) / width.toDouble() - x
-        val h = bounds.bottom.coerceIn(0, height) / height.toDouble() - y
-        if (w <= 0 || h <= 0) null else OcrLine(line.text, FrameRect(x, y, w, h), group)
+        val bounds = line.boundingBox
+        val rect = normalized(bounds)
+        val confidence = line.confidence
+        val reason = when {
+          bounds == null || rect == null -> "invalid_bounds"
+          bounds.height() < 4 -> "below_minimum_height"
+          // Low-confidence short fragments are often icons. Keep plausible words
+          // so dark or tiny chat text returned by ML Kit can still reach the TV.
+          confidence > 0 && confidence < minConfidence &&
+            (confidence < .15f || line.text.count(Char::isLetter) < 3) -> "low_confidence_fragment"
+          else -> null
+        }
+        lines?.put(ScreenOcrDiagnostics.text(line.text, rect)
+          .put("confidence", if (confidence.isFinite()) confidence.toDouble() else JSONObject.NULL)
+          .put("state", reason ?: "candidate"))
+        if (reason != null || rect == null) null else OcrLine(line.text, rect, group)
       }
-    },
-  )
+    }
+    val grouped = SmartOcr.group(candidates, rejected?.let { rows ->
+      { line, reason -> rows.put(ScreenOcrDiagnostics.text(line.text, line.rect).put("state", reason)); Unit }
+    })
+    diagnostic?.put("raw", raw)?.put("rejected", rejected)
+    return grouped
+  }
 
   private fun rememberDetections(sources: List<String>, start: Long) {
     val keys = sources.mapTo(HashSet(), ::memoryText)
@@ -252,13 +318,14 @@ internal class RemoteSubtitlePipeline(
       val inputs = live.map { it.copy(ttlMs = 0) }.sortedBy { it.id }
       if (inputs != lastLayoutInputs) {
         lastLayoutInputs = inputs
-        lastLayout = TvOverlayLayout.arrange(inputs)
+        lastLayout = TvOverlayLayout.arrange(inputs, retainUnplaced = true)
       }
       val boxes = lastLayout.map { placed -> placed.copy(ttlMs = live.first { it.id == placed.id }.ttlMs) }
       val changed = boxes.map { it.copy(ttlMs = 0) } != previousOverlay.map { it.copy(ttlMs = 0) }
       if (changed || (boxes.isNotEmpty() && now >= tvOverlayExpires - maxOf(300, scanInterval + 100))) {
         val sentAt = System.nanoTime()
         val clients = ServerController.core.sendOverlay(OverlayMessage(videoWidth, videoHeight, boxes))
+        if (ScreenOcrDiagnostics.enabled) ScreenOcrDiagnostics.published(boxes, clients)
         TranslationMetrics.record("websocket", sentAt)
         if (clients > 0 && boxes.isNotEmpty()) {
           val fresh = boxes.filter { box -> previousOverlay.none { it.id == box.id && it.text == box.text } }.map { it.id }.toSet()
@@ -277,7 +344,7 @@ internal class RemoteSubtitlePipeline(
     val source = tracker.text
     val requested = tracker.translationSource(now, options.ttlMs)
     if (requested.isNotEmpty()) requestTranslations(listOf(requested to requested), now)
-    val translated = cache[source]
+    val translated = if (tracker.readyForPublication(now, options.ttlMs)) cache[source] else null
     val previous = caption
     val shown = SubtitleCaption.select(previous, source, translated, tracker.seenAt,
       now, options.ttlMs, options.minimumMs)
@@ -299,7 +366,10 @@ internal class RemoteSubtitlePipeline(
     if (!server.refresh(shown.text, remaining)) {
       val result = server.send(shown.text, force = true, ttlMs = remaining)
       if (result.status == SendStatus.SENT) {
-        detectedAt[shown.source]?.let { TranslationMetrics.record("ocrToWebSocket", it) }
+        detectedAt[shown.source]?.let {
+          TranslationMetrics.record("ocrToWebSocket", it)
+          TranslationMetrics.record(if (options.engine == EngineId.GOOGLE_CLOUD) "cloudSubtitleTotal" else "localSubtitleTotal", it)
+        }
         update { it.copy(turkish = shown.text) }
       }
     }
@@ -348,6 +418,7 @@ internal class RemoteSubtitlePipeline(
       // requires a definite archive miss so an existing entry cannot incur a request.
       if (options.engine == EngineId.OFFLINE) handler.postDelayed(deadline, 28)
       archive.lookups.execute {
+        if (attempt.cancelled) return@execute
         val lookupStarted = System.nanoTime()
         val result = runCatching { archive.lookup(key, policy) }
         TranslationMetrics.record("sqlite", lookupStarted)
@@ -372,7 +443,7 @@ internal class RemoteSubtitlePipeline(
     val revision = archiveRevision
     update { it.copy(translation = "Çevriliyor") }
     provider.translate(TranslationRequest(key.source, glossary, attempt = attempt)).addOnCompleteListener(callbackExecutor) { task ->
-      if (!isCloud) TranslationMetrics.record("mlkit", started)
+      TranslationMetrics.record(if (isCloud) "googlePipeline" else "mlkit", started)
       if (closed || epoch != translationEpoch || !inFlight.current(key.normalized, attempt)) return@addOnCompleteListener
       inFlight.finish(key.normalized, attempt)
       val text = if (task.isSuccessful) task.result.trim().take(1200) else ""
@@ -412,7 +483,8 @@ internal class RemoteSubtitlePipeline(
   fun close() {
     closed = true
     resetStream()
-    recognizer.close()
+    ocrWorker.execute { recognizer.close() }
+    ocrWorker.shutdown()
     provider.close()
   }
 }

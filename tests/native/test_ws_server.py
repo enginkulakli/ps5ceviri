@@ -163,6 +163,8 @@ async def main():
     ws = await websockets.connect(URL, proxy=None)
     await ws.send('{"type":"hello","subtitleVersion":2}')
     await asyncio.sleep(0.1)
+    await ws.send('{"type":"ping"}')
+    check("client-initiated heartbeat receives pong", json.loads(await recv(ws)) == {"type": "pong"})
     h.cmd("TTL 800 Zamanlı")
     check("live messages carry the configured TTL", json.loads(await recv(ws)) == {"text": "Zamanlı", "ttlMs": 800})
     await asyncio.sleep(0.4)

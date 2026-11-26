@@ -10,6 +10,7 @@ core=frontend/modules/ps5-translator/android/src/main/java/expo/modules/ps5trans
 
 java -cp "$KOTLIN_COMPILER_DIR/*" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
   -no-stdlib -no-reflect -classpath "$NATIVE_TEST_CLASSPATH" -d "$build_dir/harness.jar" \
-  "$core"/*.kt tests/native/{Harness,StabilityChecks,SmartOverlayChecks,V32SubtitleChecks,V32FullScreenChecks,V32DiscoveryChecks}.kt
+  "$core"/*.kt tests/native/{Harness,StabilityChecks,SmartOverlayChecks,V32SubtitleChecks,V32FullScreenChecks,V32DiscoveryChecks,V321LatencyComparison}.kt
 printf 'QUIT\n' | java -cp "$build_dir/harness.jar:$NATIVE_TEST_CLASSPATH" HarnessKt
+java -cp "$build_dir/harness.jar:$NATIVE_TEST_CLASSPATH" V321LatencyComparisonKt
 node tests/native/console_records.test.mjs

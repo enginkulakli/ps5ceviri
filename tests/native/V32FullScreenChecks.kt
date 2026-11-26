@@ -1,6 +1,8 @@
 import expo.modules.ps5translator.core.DetectedText
 import expo.modules.ps5translator.core.FrameRect
 import expo.modules.ps5translator.core.OcrFrame
+import expo.modules.ps5translator.core.OverlayBox
+import expo.modules.ps5translator.core.TvOverlayLayout
 import expo.modules.ps5translator.core.OcrLine
 import expo.modules.ps5translator.core.OverlayTracker
 import expo.modules.ps5translator.core.SmartOcr
@@ -12,6 +14,15 @@ fun checksV32FullScreen() {
   check(sampled.nv21[1079 * 1920 + 1919] == 71.toByte())
   check(sampled.nv21[1080 * 1920] == 128.toByte())
   check(source.enlargeForText() === source)
+  val subdued = OcrFrame(ByteArray(1280 * 720 * 3 / 2) { if ((it % 1280) < 640) 80 else 120 }, 1280, 720)
+    .enlargeForText()
+  check((subdued.nv21[0].toInt() and 255) < 80)
+  check((subdued.nv21[1919].toInt() and 255) > 120)
+  val adjacent = SmartOcr.group(listOf(
+    OcrLine("Please come home.", FrameRect(.6, .20, .19, .022), 2),
+    OcrLine("Call me right now.", FrameRect(.60, .232, .19, .022), 2),
+  ))
+  check(adjacent.size == 2)
 
   val detect = SmartOcr.group(listOf(
     OcrLine("Can you wait until", FrameRect(.62, .30, .19, .022), 1),
@@ -39,4 +50,17 @@ fun checksV32FullScreen() {
   check(tracker.alive(1200, 1500).single().text == short.text)
   tracker.observe(emptyList(), 1400, 1500, sceneChanged = true)
   check(tracker.alive(1400, 1500).isEmpty())
+
+  val compact = (1L..8L).map { id -> OverlayBox(id, "Birbiriyle çakışan bağımsız mesaj $id", lower, 1000) }
+  check(TvOverlayLayout.arrange(compact).size < compact.size)
+  val forwarded = TvOverlayLayout.arrange(compact, retainUnplaced = true)
+  check(forwarded.map { it.id } == compact.map { it.id })
+  check(forwarded.all { it.rect.x + it.rect.w <= 1.0 && it.rect.y + it.rect.h <= 1.0 })
+  val excluded = mutableListOf<String>()
+  val admitted = SmartOcr.group(listOf(
+    OcrLine("Please read this tiny message", lower, 1),
+    OcrLine("Please read this tiny message", lower, 1),
+    OcrLine("Back", FrameRect(.88, .91, .08, .02), 2),
+  )) { _, reason -> excluded.add(reason) }
+  check(admitted.size == 1 && excluded.toSet() == setOf("duplicate", "hud_or_noise"))
 }

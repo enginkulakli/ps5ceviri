@@ -4,6 +4,9 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
   private var count = 0
   private var candidate = ""
   private var candidateAt = 0L
+  private var candidateStartedAt = 0L
+  var confirmationMs = 0L
+    private set
   private var candidateJitter = false
   var text = ""
     private set
@@ -19,7 +22,9 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
       count = 0
       return false
     }
-    count = if (normalized == candidate && now - candidateAt <= maxOf(1400, intervalMs * 2 + 200)) count + 1 else 1
+    val continuing = normalized == candidate && now - candidateAt <= maxOf(1400, intervalMs * 2 + 200)
+    count = if (continuing) count + 1 else 1
+    if (!continuing) candidateStartedAt = now
     candidate = normalized
     candidateAt = now
     candidateJitter = text.length >= 12 && looksLikeOcrJitter(text, normalized, reliable) && count < 2
@@ -29,6 +34,7 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     }
     // Confirmation controls presentation. A plausible candidate may start translating now.
     if (count < confirmations && !(confirmations == 2 && reliable)) return false
+    confirmationMs = now - candidateStartedAt
     text = normalized
     seenAt = now
     candidate = ""
@@ -40,6 +46,18 @@ internal class SubtitleTracker(private val intervalMs: Long, private val confirm
     if (candidate.isNotEmpty() && !candidateJitter && now - candidateAt < ttl) return candidate
     return text.takeIf { now - seenAt < ttl }.orEmpty()
   }
+
+  fun nextScanInterval(now: Long): Long {
+    if (intervalMs > 300) return intervalMs
+    // The usual two-read mode gets its second sample at the supported scan floor.
+    // Stable text and deliberate three/four-read configurations keep their cadence.
+    if (confirmations == 2 && count == 1 && !candidateJitter && now - candidateAt <= intervalMs) {
+      return minOf(50, intervalMs)
+    }
+    return if (recentlyRead(now)) minOf(180, intervalMs) else intervalMs
+  }
+
+  fun readyForPublication(now: Long, ttl: Long) = text.isNotEmpty() && translationSource(now, ttl) == text
 
   fun recentlyRead(now: Long) =
     (text.isNotEmpty() && now - seenAt < 500) || (candidate.isNotEmpty() && now - candidateAt < 500)

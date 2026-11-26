@@ -21,9 +21,11 @@ internal object TranslationMetrics {
   }
   private val series = LinkedHashMap<String, Samples>()
 
+  fun record(stage: String, started: Long) = recordDuration(stage, System.nanoTime() - started)
+
   @Synchronized
-  fun record(stage: String, started: Long) {
-    series.getOrPut(stage, ::Samples).add(TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - started))
+  fun recordDuration(stage: String, nanos: Long) {
+    series.getOrPut(stage, ::Samples).add(TimeUnit.NANOSECONDS.toMicros(nanos))
   }
 
   @Synchronized

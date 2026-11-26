@@ -16,14 +16,20 @@ internal fun memoryText(value: String) = cleanOcr(value)
 internal object SmartOcr {
   private data class Paragraph(val block: DetectedText, val last: OcrLine)
 
-  fun group(lines: List<OcrLine>): List<DetectedText> {
-    val normalized = lines.take(160).mapNotNull(::cleanLine).sortedBy { it.rect.y }
+  fun group(lines: List<OcrLine>, rejected: ((OcrLine, String) -> Unit)? = null): List<DetectedText> {
+    val normalized = lines.take(160).mapNotNull { line ->
+      cleanLine(line).also { if (it == null) rejected?.invoke(line, "hud_or_noise") }
+    }.sortedBy { it.rect.y }
+    if (rejected != null) lines.drop(160).forEach { rejected(it, "line_limit") }
     val groupSizes = normalized.groupingBy { it.group }.eachCount()
     val distinct = mutableListOf<OcrLine>()
     for (line in normalized) {
       val duplicate = distinct.indexOfFirst { it.text == line.text && it.rect.overlap(line.rect) > .55 }
       if (duplicate < 0) distinct.add(line)
-      else if (groupSizes.getValue(line.group) > groupSizes.getValue(distinct[duplicate].group)) distinct[duplicate] = line
+      else if (groupSizes.getValue(line.group) > groupSizes.getValue(distinct[duplicate].group)) {
+        rejected?.invoke(distinct[duplicate], "duplicate")
+        distinct[duplicate] = line
+      } else rejected?.invoke(line, "duplicate")
     }
     val paragraphs = mutableListOf<Paragraph>()
     for (line in distinct.sortedBy { it.rect.y }) {
@@ -40,7 +46,9 @@ internal object SmartOcr {
           (previous.text.count { it == ' ' } >= 2 || line.text.first().isLowerCase())
         val continuation = previous.text.count { it == ' ' } >= 2 &&
           previous.text.last() !in ".!?:…" && (line.text.first().isLowerCase() || previous.text.endsWith('-'))
-        aligned && gap in -.004..(lineHeight * if (sameBlock) .52 else .32) &&
+        val sentenceBoundary = previous.text.last() in ".!?:…" && line.text.first().isUpperCase()
+        val wrapGap = if (sameBlock && !sentenceBoundary) .52 else .32
+        aligned && gap in -.004..(lineHeight * wrapGap) &&
           (sameBlock || continuation) && block.text.length + line.text.length <= 420
       }.minByOrNull { abs(paragraphs[it].last.rect.bottom - line.rect.y) }
       if (best == null) paragraphs.add(Paragraph(DetectedText(line.text, line.rect), line))
@@ -50,6 +58,7 @@ internal object SmartOcr {
         paragraphs[best] = Paragraph(DetectedText(joined, previous.rect.union(line.rect)), line)
       }
     }
+    if (rejected != null) paragraphs.drop(48).forEach { rejected(it.last, "group_limit") }
     return paragraphs.map { it.block }.take(48)
   }
 
@@ -90,15 +99,27 @@ internal object TvOverlayLayout {
 
   private data class Placement(val box: OverlayBox, val painted: List<FrameRect>)
 
-  fun arrange(boxes: List<OverlayBox>): List<OverlayBox> {
+  fun arrange(boxes: List<OverlayBox>, retainUnplaced: Boolean = false): List<OverlayBox> {
     val placed = mutableListOf<Placement>()
+    val fallback = mutableListOf<OverlayBox>()
     // Keep message content when its original area cannot also fit nearby labels.
     val source = boxes.sortedWith(compareByDescending<OverlayBox> { it.text.length > 60 }
       .thenBy { it.rect.y }.thenBy { it.rect.x }.thenBy { it.id })
     for (box in source) {
-      place(box, placed)?.let(placed::add)
+      val placement = place(box, placed)
+      if (placement != null) placed.add(placement)
+      else if (retainUnplaced) fallback.add(place(box, emptyList())?.box ?: anchor(box))
     }
-    return placed.map { it.box }.sortedBy { it.id }
+    return (placed.map { it.box } + fallback).sortedBy { it.id }
+  }
+
+  private fun anchor(box: OverlayBox): OverlayBox {
+    val w = box.rect.w.coerceIn(.025, MAX_WIRE_WIDTH)
+    val h = box.rect.h.coerceIn(.01, .32)
+    return box.copy(rect = FrameRect(
+      (box.rect.cx - w / 2).coerceIn(0.0, 1 - w),
+      box.rect.y.coerceIn(0.0, 1 - h), w, h,
+    ))
   }
 
   private fun place(box: OverlayBox, placed: List<Placement>): Placement? {
