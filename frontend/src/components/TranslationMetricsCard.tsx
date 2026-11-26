@@ -8,6 +8,8 @@ import { makeStyles } from "@/src/theme";
 
 const LABELS = {
   framePreparation: "Kare hazırlığı", ocr: "ML Kit OCR", ocrDelivery: "OCR sonucu işleme kuyruğu",
+  phoneProbe: "Telefon · görüntü karşılaştırma", phoneFullOcr: "Telefon · tam kare OCR",
+  phoneRegionOcr: "Telefon · bölgesel OCR", phoneToWebSocket: "Telefon · değişen kare → WebSocket",
   stability: "İlk okuma → altyazı onayı", comparison: "Metin karşılaştırma", ram: "RAM", sqlite: "SQLite",
   mlkit: "Yerel çeviri", googleCloud: "Google Cloud HTTP", googlePipeline: "Google Cloud çeviri işlemi", websocket: "WebSocket gönderim kuyruğu",
   ocrToWebSocket: "Kare → WebSocket", localSubtitleTotal: "Yerel altyazı · kare → WebSocket",

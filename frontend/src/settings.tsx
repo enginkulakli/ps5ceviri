@@ -1,12 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 import { OcrRegion } from "@/src/native/bridge";
+import { DEFAULT_SUBTITLE_REGION } from "@/src/native/regionGeometry";
 import type { ConsoleRecord } from "@/src/native/consoleRecords";
 import { storage } from "@/src/utils/storage";
 
 export type Console = ConsoleRecord;
 
-export type TranslationMode = "subtitle" | "fullscreen";
+export type TranslationMode = "subtitle" | "fullscreen" | "phone";
 export type TranslationEngine = "offline" | "google_cloud" | "ai";
 export type GlossaryEntry = { source: string; target: string };
 
@@ -43,7 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   targetLang: "tr",
   engine: "offline",
   mode: "subtitle",
-  ocrRegion: { x: 0, y: 0.72, w: 1, h: 0.28 },
+  ocrRegion: DEFAULT_SUBTITLE_REGION,
   exclusions: [],
   confirmations: 2,
   minimumVisibleMs: 700,
@@ -94,7 +95,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
                 ? [{ source: term.source, target: term.target }] : [];
             }).slice(0, 80) : [];
           const engine = saved.engine === "google_cloud" || saved.engine === "ai" ? saved.engine : "offline";
-          setSettings({ ...DEFAULT_SETTINGS, ...saved, engine, glossary, clearDelayMs: migratedDelay });
+          const mode = saved.mode === "fullscreen" || saved.mode === "phone" ? saved.mode : "subtitle";
+          setSettings({ ...DEFAULT_SETTINGS, ...saved, engine, mode, glossary, clearDelayMs: migratedDelay });
         } catch {}
       }
       setReady(true);

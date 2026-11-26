@@ -33,21 +33,21 @@ export default function Dashboard() {
     { id: "ps5", title: "PS5 bağlantısı", icon: "game-controller-outline", kind: status?.console === "PS5 bağlı" ? "ready" : stageKind, label: status?.console, detail: status?.host ?? undefined },
     { id: "session", title: "Remote Play oturumu", icon: "radio-outline", kind: streaming ? "ready" : stageKind, label: status?.session },
     { id: "video", title: "Görüntü akışı", icon: "videocam-outline", kind: streaming ? "ready" : stageKind, label: status?.video },
-    { id: "ocr", title: "OCR", icon: "scan-outline", kind: streaming ? "ready" : stageKind, label: status?.ocr, detail: `${settings.mode === "fullscreen" ? Math.max(500, settings.ocrIntervalMs) : settings.ocrIntervalMs} ms` },
+    { id: "ocr", title: "OCR", icon: "scan-outline", kind: streaming ? "ready" : stageKind, label: status?.ocr, detail: settings.mode === "phone" ? "Görüntü değişince OCR" : `${settings.mode === "fullscreen" ? Math.max(500, settings.ocrIntervalMs) : settings.ocrIntervalMs} ms` },
     { id: "engine", title: "Çeviri motoru", icon: "language-outline", kind: status?.translation === "ML Kit hazır" ? "ready" : stageKind, label: status?.translation, detail: settings.engine === "offline" ? "ML Kit · İngilizce → Türkçe" : settings.engine === "google_cloud" ? "Google Cloud · Basic v2" : "API yapılandırılmadı" },
     { id: "tv", title: "TV bağlantısı", icon: "tv-outline", kind: tvKind, label: tvLabel, detail: `ws://${tv.state?.localIp ?? "TABLET_IP"}:${tv.state?.port ?? settings.tvPort}` },
   ];
 
   return (
     <View style={styles.root} testID="dashboard-screen">
-      <ScreenHeader title="PS5 Çevirmen" subtitle={settings.mode === "fullscreen" ? "Tam ekran çeviri" : "Altyazı çevirisi"} />
+      <ScreenHeader title="PS5 Çevirmen" subtitle={settings.mode === "fullscreen" ? "Tam Ekran Çeviri" : settings.mode === "phone" ? "Telefon Çeviri" : "Altyazı Çeviri"} />
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomChrome + space.xl }]}>
         <Card>
           <Button testID="toggle-live-translation" label={status?.active ? "Çeviriyi Durdur" : "Çeviriyi Başlat"}
             icon={status?.active ? "stop-circle-outline" : "play-outline"} loading={busy}
             disabled={!hasNative("startSession")} onPress={toggle} />
-          {settings.mode === "fullscreen" && !status?.overlayClients ?
-            <Notice kind="info" text="Tam ekran çeviri için V2 TV uygulamasını bağlayın." /> : null}
+          {settings.mode !== "subtitle" && !status?.overlayClients ?
+            <Notice kind="info" text="Konumlu çeviri için V2 veya daha yeni TV uygulamasını bağlayın." /> : null}
           {error || status?.error ? <Notice kind="error" text={(error ?? status?.error)!} /> : null}
         </Card>
         <SectionTitle title="Bağlantı durumu" />

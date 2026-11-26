@@ -60,10 +60,13 @@ export default function SettingsScreen() {
       <SectionTitle title="Çeviri modu" />
       <Card>
         <View style={styles.row}>
-          <Chip testID="translation-mode-subtitle" label="Altyazı çevirisi" selected={s.mode === "subtitle"} onPress={() => update({ mode: "subtitle" })} />
-          <Chip testID="translation-mode-fullscreen" label="Tam ekran çeviri" selected={s.mode === "fullscreen"} onPress={() => update({ mode: "fullscreen" })} />
+          <Chip testID="translation-mode-subtitle" label="Altyazı Çeviri" selected={s.mode === "subtitle"} onPress={() => update({ mode: "subtitle" })} />
+          <Chip testID="translation-mode-fullscreen" label="Tam Ekran Çeviri" selected={s.mode === "fullscreen"} onPress={() => update({ mode: "fullscreen" })} />
+          <Chip testID="translation-mode-phone" label="Telefon Çeviri" selected={s.mode === "phone"} onPress={() => update({ mode: "phone" })} />
         </View>
-        <Text style={styles.meta}>{s.mode === "subtitle" ? "Seçili altyazı alanı taranır." : "Tam kare taranır. Konumlu çeviriler V2 TV uygulamasında görünür."}</Text>
+        <Text style={styles.meta}>{s.mode === "subtitle" ? "Seçili altyazı alanı taranır." :
+          s.mode === "phone" ? "Sabit mesajlar ekranda kalır. Görüntü değişince ilgili alanlar okunur." :
+          "Tam kare düzenli olarak taranır."}</Text>
       </Card>
 
       <SectionTitle title="Manuel test dili" />

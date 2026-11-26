@@ -154,7 +154,11 @@ class RemotePlayService : Service() {
   private fun drainVideo() {
     val decoder = decoder ?: return
     try {
-      decoder.drain({ pipeline?.needsFrame(SystemClock.elapsedRealtime()) == true }) { image ->
+      var translateFrame = false
+      decoder.drain({
+        translateFrame = pipeline?.needsFrame(SystemClock.elapsedRealtime()) == true
+        translateFrame || RemoteRegionPreview.wantsFrame()
+      }) { image ->
         val now = SystemClock.elapsedRealtime()
         if (streamingSince == 0L) {
           streamingSince = now
@@ -162,7 +166,10 @@ class RemotePlayService : Service() {
         }
         if (now - streamingSince >= 15000) attemptNumber = 0
         deadline = now + 8000
-        if (image != null) pipeline?.process(image)
+        if (image != null) {
+          if (translateFrame) pipeline?.process(image)
+          if (RemoteRegionPreview.wantsFrame()) RemoteRegionPreview.accept(image)
+        }
       }
       if (SystemClock.elapsedRealtime() >= deadline) {
         retry(if (streamingSince == 0L) "PS5 görüntüsü alınamadı" else "PS5 görüntü akışı durdu")

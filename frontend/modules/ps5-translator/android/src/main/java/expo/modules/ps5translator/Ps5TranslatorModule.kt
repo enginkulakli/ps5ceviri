@@ -213,6 +213,10 @@ class Ps5TranslatorModule : Module() {
       }
     }
 
+    AsyncFunction("captureRemoteRegionPreview") {
+      if (RemotePlayService.status.active) RemoteRegionPreview.capture() else null
+    }
+
     AsyncFunction("getTranslationMetrics") { TranslationMetrics.snapshot().toString() }
     AsyncFunction("setScreenOcrDiagnostics") { enabled: Boolean -> ScreenOcrDiagnostics.configure(enabled) }
     AsyncFunction("getScreenOcrDiagnostics") { ScreenOcrDiagnostics.snapshot() }

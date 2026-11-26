@@ -2,6 +2,8 @@ import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { RemoteRegionEditor } from "@/src/components/RemoteRegionEditor";
+import { DEFAULT_SUBTITLE_REGION } from "@/src/native/regionGeometry";
 import { RegionPreview } from "@/src/components/RegionPreview";
 import { ScreenHeader } from "@/src/components/ScreenHeader";
 import { Button, Card, Chip, SectionTitle, Stepper } from "@/src/components/ui";
@@ -11,7 +13,7 @@ import { useSettings } from "@/src/settings";
 import { makeStyles } from "@/src/theme";
 
 const PRESETS: { id: string; label: string; r: OcrRegion }[] = [
-  { id: "bottom28", label: "Alt %28 (varsayılan)", r: { x: 0, y: 0.72, w: 1, h: 0.28 } },
+  { id: "bottom28", label: "Alt %28 (varsayılan)", r: DEFAULT_SUBTITLE_REGION },
   { id: "bottom20", label: "Alt %20", r: { x: 0, y: 0.8, w: 1, h: 0.2 } },
   { id: "bottom35", label: "Alt %35", r: { x: 0, y: 0.65, w: 1, h: 0.35 } },
   { id: "center-bottom", label: "Orta alt", r: { x: 0.15, y: 0.74, w: 0.7, h: 0.22 } },
@@ -25,6 +27,7 @@ export default function OcrRegionScreen() {
   const insets = useSafeAreaInsets();
   const { settings, update } = useSettings();
   const r = settings.ocrRegion;
+  const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState(0);
   const areas = settings.exclusions;
   const index = Math.min(selected, areas.length - 1);
@@ -54,6 +57,9 @@ export default function OcrRegionScreen() {
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
         <View style={{ marginTop: space.lg }}>
           <RegionPreview region={r} exclusions={areas} testID="ocr-region-editor-preview" />
+          <View style={{ marginTop: space.md }}>
+            <Button testID="edit-remote-region" label="Alanı Düzenle" onPress={() => setEditing(true)} />
+          </View>
         </View>
         <SectionTitle title="Hazır alanlar" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -86,6 +92,8 @@ export default function OcrRegionScreen() {
           </> : null}
         </Card>
       </ScrollView>
+      {editing ? <RemoteRegionEditor initial={r} onCancel={() => setEditing(false)}
+        onSave={next => { update({ ocrRegion: next }); setEditing(false); }} /> : null}
     </View>
   );
 }

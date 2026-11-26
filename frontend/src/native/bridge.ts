@@ -101,6 +101,7 @@ export interface Ps5TranslatorNativeModule {
   removeLanguageModel(language: string): Promise<void>;
   stopSession(): Promise<void>;
   getRemotePlayStatus(): Promise<RemotePlayStatus>;
+  captureRemoteRegionPreview(): Promise<{ data: string; width: number; height: number } | null>;
   translateOffline(text: string, source: string, target: string): Promise<string>;
 }
 
